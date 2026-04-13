@@ -1,8 +1,9 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet } from 'react-native';
 
-// Pantallas (Deberás crearlas o importarlas)
+// Importación de tus pantallas
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -14,24 +15,82 @@ export default function TabNavigator() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: true,
-        headerStyle: { backgroundColor: '#1D4ED8' },
-        headerTitleStyle: { color: 'white', fontWeight: 'bold' },
-        headerTitle: "CityGo", // Nombre de la app arriba
+        // Estilo de la cabecera superior (Header)
+        headerStyle: { 
+          backgroundColor: '#1D4ED8',
+          elevation: 0, // Quita sombra en Android
+          shadowOpacity: 0, // Quita sombra en iOS
+        },
+        headerTitleAlign: 'center',
+        headerTitleStyle: { 
+          color: 'white', 
+          fontWeight: '900', 
+          fontSize: 20,
+          letterSpacing: 0.5 
+        },
+        headerTitle: "CityGo",
+        
+        // Estilo de la barra inferior (Tab Bar)
         tabBarActiveTintColor: '#1D4ED8',
-        tabBarInactiveTintColor: 'gray',
-        tabBarStyle: { height: 60, paddingBottom: 10 },
-        tabBarIcon: ({ color, size }) => {
+        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarShowLabel: true,
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          marginBottom: 5,
+        },
+        tabBarStyle: { 
+          height: 70, 
+          paddingTop: 10,
+          paddingBottom: 10,
+          borderTopWidth: 1,
+          borderTopColor: '#E5E7EB',
+          backgroundColor: 'white',
+        },
+        
+        tabBarIcon: ({ focused, color, size }) => {
           let iconName: any;
-          if (route.name === 'Mapa') iconName = 'map';
-          else if (route.name === 'Mensajes') iconName = 'chatbubbles';
-          else if (route.name === 'Perfil') iconName = 'person';
-          return <Ionicons name={iconName} size={size} color={color} />;
+
+          if (route.name === 'Mapa') {
+            iconName = focused ? 'map' : 'map-outline';
+          } else if (route.name === 'Mensajes') {
+            iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
+          } else if (route.name === 'Perfil') {
+            iconName = focused ? 'person' : 'person-outline';
+          }
+
+          return (
+            <View style={focused ? styles.activeTabIcon : null}>
+              <Ionicons name={iconName} size={24} color={color} />
+            </View>
+          );
         },
       })}
     >
-      <Tab.Screen name="Mapa" component={HomeScreen} />
-      <Tab.Screen name="Mensajes" component={MessagesScreen} />
-      <Tab.Screen name="Perfil" component={ProfileScreen} />
+      <Tab.Screen 
+        name="Mapa" 
+        component={HomeScreen} 
+        options={{ title: 'Explorar' }} 
+      />
+      <Tab.Screen 
+        name="Mensajes" 
+        component={MessagesScreen} 
+        options={{ title: 'Mensajes', tabBarBadge: 2 }} // Badge para simular notificaciones
+      />
+      <Tab.Screen 
+        name="Perfil" 
+        component={ProfileScreen} 
+        options={{ title: 'Mi Perfil' }}
+      />
     </Tab.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  activeTabIcon: {
+    backgroundColor: '#DBEAFE', // Un azul muy claro para resaltar el icono activo
+    paddingHorizontal: 15,
+    paddingVertical: 4,
+    borderRadius: 20,
+  }
+});

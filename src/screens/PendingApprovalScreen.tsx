@@ -1,8 +1,30 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getUserInfoApi } from '../../utils/services/userService';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useAuth } from '../../utils/context/AuthContext';
 
 export default function PendingApprovalScreen({ navigation }: any) {
+  const { aproveed } = useAuth()
+  useEffect(() => {
+    handleGetInfo();
+  }, []);
+  
+  async function handleGetInfo() {
+    try {
+      const token = await AsyncStorage.getItem('authToken') || '';
+      const response = await getUserInfoApi(token);
+      if (response.isApproved) {
+        aproveed(true);
+        navigation.replace('Home');
+      }
+    } catch (error) {
+      console.error("Error fetching user info:", error);
+    }
+    
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>En Revisión</Text>

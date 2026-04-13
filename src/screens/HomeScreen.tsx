@@ -1,191 +1,144 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Text, Switch, TouchableOpacity, Alert, Modal } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
+import { useAuth } from '../../utils/context/AuthContext';
 
-// --- TIPOS ---
-interface RideRequest {
-  id: string;
-  clientName: string;
-  origin: string;
-  distance: string;
-  price: string;
-  lat: number;
-  lng: number;
-}
+const { width, height } = Dimensions.get('window');
+// REEMPLAZA CON TU GOOGLE MAPS API KEY
+const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA'; 
 
-// --- MOCKS ---
-const MOCK_RIDE_REQUEST: RideRequest = {
-  id: 'pasajero-1',
-  clientName: 'María García',
-  origin: 'Parque Calderón, Cuenca',
-  distance: '2.5 km',
-  price: '$3.50',
-  lat: -2.9020,
-  lng: -78.9950
-};
+export default function HomeScreen() {
+  const { login, aproveed } = useAuth()
+  const [region, setRegion] = useState<any>(null);
+  const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE'>('IDLE');
+  
+  // Coordenadas de los puntos
+  const [pickupCoords, setPickupCoords] = useState<any>(null);
+  const [destinationCoords, setDestinationCoords] = useState<any>(null);
+  
+  const mapRef = useRef<MapView>(null);
 
-export default function HomeScreen({ route }: any) {
-  // 1. Estados de Usuario y Rol
-  const userRole = route.params?.role || 'CLIENT';
-  const userName = route.params?.name || 'Usuario CityGo';
-  const [isDriverActive, setIsDriverActive] = useState(true);
-
-  // 2. Estados de Carreras
-  const [selectedRide, setSelectedRide] = useState<RideRequest | null>(null);
-  const [ridesList, setRidesList] = useState<RideRequest[]>([]);
-
-  // 3. Simulación inicial (Solo para demo)
   useEffect(() => {
-    if (userRole === 'DRIVER' && isDriverActive) {
-      const timer = setTimeout(() => {
-        // Al llegar la carrera, la ponemos en la lista (globo) y en el modal
-        setRidesList([MOCK_RIDE_REQUEST]);
-        setSelectedRide(MOCK_RIDE_REQUEST);
-      }, 5000);
-      return () => clearTimeout(timer);
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      let loc = await Location.getCurrentPositionAsync({});
+      const initialRegion = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+      setRegion(initialRegion);
+    })();
+  }, []);
+
+  // Función al pulsar el botón principal
+  const handleAction = () => {
+    if (status === 'IDLE') {
+      setStatus('PICKUP');
+    } else if (status === 'PICKUP') {
+      setPickupCoords({ latitude: region.latitude, longitude: region.longitude });
+      setStatus('DESTINATION');
+    } else if (status === 'DESTINATION') {
+      setDestinationCoords({ latitude: region.latitude, longitude: region.longitude });
+      setStatus('ROUTE');
     }
-  }, [isDriverActive, userRole]);
-
-  // 4. Lógica de Notificaciones Reales
-  useEffect(() => {
-    const notificationListener = Notifications.addNotificationReceivedListener(notification => {
-      const data = notification.request.content.data as any;
-      if (data && data.id) {
-        const newRide: RideRequest = {
-          id: data.id,
-          clientName: data.clientName || 'Cliente Nuevo',
-          origin: data.origin || 'Ubicación cercana',
-          distance: data.distance || 'A pocos km',
-          price: data.price || '$0.00',
-          lat: parseFloat(data.lat),
-          lng: parseFloat(data.lng),
-        };
-        setRidesList(prev => [...prev, newRide]);
-        if (isDriverActive) setSelectedRide(newRide);
-      }
-    });
-
-    const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data as any;
-      if (data) setSelectedRide(data);
-    });
-
-    return () => {
-    notificationListener.remove(); // Se usa el método del objeto retornado
-    responseListener.remove();     // Se usa el método del objeto retornado
   };
-  }, [isDriverActive]);
+
+  const resetFlow = () => {
+    setStatus('IDLE');
+    setPickupCoords(null);
+    setDestinationCoords(null);
+  };
+
+  if (!region) return <ActivityIndicator style={{flex:1}} size="large" color="#1D4ED8" />;
 
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
-        initialRegion={{
-          latitude: -2.9001,
-          longitude: -79.0059,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        }}
+        initialRegion={region}
+        onRegionChangeComplete={(reg) => setRegion(reg)}
+        showsUserLocation={true}
       >
-        {/* Renderizado de Globos (Markers) en el mapa */}
-        {isDriverActive && userRole === 'DRIVER' && ridesList.map((ride) => (
-          <Marker 
-            key={ride.id}
-            coordinate={{ latitude: ride.lat, longitude: ride.lng }}
-            onPress={() => setSelectedRide(ride)}
-          >
-            <View style={styles.customMarker}>
-              <View style={styles.markerBubble}>
-                <Text style={styles.markerPriceText}>{ride.price}</Text>
-              </View>
-              <View style={styles.markerArrow} />
-            </View>
+        {/* Marcadores Estáticos (Solo aparecen cuando ya fueron confirmados) */}
+        {pickupCoords && status !== 'PICKUP' && (
+          <Marker coordinate={pickupCoords} title="Recogida">
+            <Ionicons name="location" size={40} color="#1D4ED8" />
           </Marker>
-        ))}
+        )}
+        
+        {destinationCoords && status === 'ROUTE' && (
+          <Marker coordinate={destinationCoords} title="Destino">
+            <Ionicons name="location" size={40} color="#EF4444" />
+          </Marker>
+        )}
+
+        {/* TRAZADO DE RUTA REAL */}
+        {status === 'ROUTE' && pickupCoords && destinationCoords && (
+          <MapViewDirections
+            origin={pickupCoords}
+            destination={destinationCoords}
+            apikey={GOOGLE_MAPS_APIKEY}
+            strokeWidth={5}
+            strokeColor="#1D4ED8"
+            onReady={result => {
+              mapRef.current?.fitToCoordinates(result.coordinates, {
+                edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+              });
+            }}
+          />
+        )}
       </MapView>
 
-      {/* OVERLAY SUPERIOR: Switch de Conductor */}
-      <View style={styles.topContainer}>
-        {userRole === 'DRIVER' ? (
-          <View style={[styles.statusCard, isDriverActive ? styles.activeCard : styles.inactiveCard]}>
-            <View>
-              <Text style={styles.statusLabel}>{isDriverActive ? "EN LÍNEA" : "MODO PASAJERO"}</Text>
-              <Text style={styles.driverName}>{userName}</Text>
+      {/* PIN FIJO CENTRAL (Solo durante selección) */}
+      {(status === 'PICKUP' || status === 'DESTINATION') && (
+        <View style={styles.markerFixed} pointerEvents="none">
+          <View style={[styles.markerLabel, { backgroundColor: status === 'PICKUP' ? '#1D4ED8' : '#EF4444' }]}>
+            <Text style={styles.markerLabelText}>
+              {status === 'PICKUP' ? 'Punto de partida' : 'Punto de destino'}
+            </Text>
+          </View>
+          <Ionicons 
+            name="location" 
+            size={50} 
+            color={status === 'PICKUP' ? "#1D4ED8" : "#EF4444"} 
+          />
+        </View>
+      )}
+
+      {/* INTERFAZ DE USUARIO INFERIOR */}
+      <View style={styles.bottomContainer}>
+        {status === 'ROUTE' ? (
+          <View style={styles.confirmCard}>
+            <Text style={styles.routeInfoTitle}>Viaje Sugerido</Text>
+            <View style={styles.priceRow}>
+              <Text style={styles.priceText}>$3.50</Text>
+              <Text style={styles.timeText}>10-15 min</Text>
             </View>
-            <Switch
-              value={isDriverActive}
-              onValueChange={setIsDriverActive}
-              trackColor={{ false: "#9CA3AF", true: "#34D399" }}
-            />
+            <TouchableOpacity style={styles.btnConfirm} onPress={() => Alert.alert("CityGo", "Buscando conductor...")}>
+              <Text style={styles.btnText}>Solicitar CityGo Now</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={resetFlow} style={styles.btnCancel}>
+              <Text style={styles.btnCancelText}>Cambiar ruta</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.clientHeader}>
-            <Ionicons name="search" size={20} color="#1D4ED8" />
-            <Text style={styles.clientHeaderText}>¿A dónde vamos hoy?</Text>
-          </View>
-        )}
-      </View>
-
-      {/* OVERLAY INFERIOR: Botón Solicitar */}
-      <View style={styles.bottomContainer}>
-        {(!isDriverActive || userRole === 'CLIENT') && (
-          <TouchableOpacity style={styles.btnRequest}>
-            <Text style={styles.btnRequestText}>Solicitar Unidad</Text>
+          <TouchableOpacity style={styles.mainActionBtn} onPress={handleAction}>
+            <Text style={styles.mainActionText}>
+              {status === 'IDLE' && "Solicitar un Go"}
+              {status === 'PICKUP' && "Confirmar recogida aquí"}
+              {status === 'DESTINATION' && "Confirmar destino aquí"}
+            </Text>
           </TouchableOpacity>
         )}
       </View>
-
-      {/* MODAL / DIÁLOGO DE CARRERA (Aparece al recibir notificación o tocar globo) */}
-      <Modal 
-        visible={selectedRide !== null} 
-        transparent 
-        animationType="slide"
-        onRequestClose={() => setSelectedRide(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.rideCard}>
-            <View style={styles.rideHeader}>
-              <Text style={styles.newRideTitle}>NUEVA SOLICITUD</Text>
-              <Text style={styles.ridePrice}>{selectedRide?.price}</Text>
-            </View>
-            
-            <View style={styles.rideInfo}>
-              <Ionicons name="person-circle" size={45} color="#1D4ED8" />
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.clientName}>{selectedRide?.clientName}</Text>
-                <Text style={styles.rideDistance}>A {selectedRide?.distance} de ti</Text>
-              </View>
-            </View>
-
-            <View style={styles.locationBox}>
-              <Text style={styles.originText}>📍 {selectedRide?.origin}</Text>
-            </View>
-
-            <View style={styles.actions}>
-              <TouchableOpacity 
-                style={styles.btnDecline} 
-                onPress={() => setSelectedRide(null)}
-              >
-                <Text style={styles.btnDeclineText}>Ignorar</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.btnAccept} 
-                onPress={() => {
-                  Alert.alert("¡Éxito!", "Has aceptado el viaje. Dirígete al punto de recogida.");
-                  setSelectedRide(null);
-                }}
-              >
-                <Text style={styles.btnAcceptText}>Aceptar Carrera</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -194,39 +147,51 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { ...StyleSheet.absoluteFillObject },
   
-  // Estilos de Marcador Personalizado (Globos)
-  customMarker: { alignItems: 'center' },
-  markerBubble: { backgroundColor: '#1D4ED8', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: 'white' },
-  markerPriceText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
-  markerArrow: { width: 0, height: 0, borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#1D4ED8', marginTop: -1 },
+  // Pin Fijo en el Centro del Mapa
+  markerFixed: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginLeft: -25,
+    marginTop: -55,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerLabel: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  markerLabelText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
 
-  topContainer: { position: 'absolute', top: 60, left: 20, right: 20 },
-  statusCard: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderRadius: 15, elevation: 10, alignItems: 'center' },
-  activeCard: { backgroundColor: '#1D4ED8' },
-  inactiveCard: { backgroundColor: '#4B5563' },
-  statusLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: 'bold' },
-  driverName: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  clientHeader: { backgroundColor: 'white', padding: 15, borderRadius: 30, flexDirection: 'row', alignItems: 'center', elevation: 5 },
-  clientHeaderText: { marginLeft: 10, color: '#4B5563', fontWeight: '500' },
-  
-  bottomContainer: { position: 'absolute', bottom: 40, left: 20, right: 20 },
-  btnRequest: { backgroundColor: '#1D4ED8', padding: 18, borderRadius: 15, alignItems: 'center', elevation: 5 },
-  btnRequestText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
-  
-  // Modal de Carrera
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  rideCard: { backgroundColor: 'white', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25 },
-  rideHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  newRideTitle: { color: '#1D4ED8', fontWeight: 'bold', fontSize: 14 },
-  ridePrice: { fontSize: 26, fontWeight: 'bold', color: '#10B981' },
-  rideInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-  clientName: { fontSize: 18, fontWeight: 'bold' },
-  rideDistance: { color: '#6B7280' },
-  locationBox: { backgroundColor: '#F3F4F6', padding: 12, borderRadius: 10, marginBottom: 25 },
-  originText: { color: '#374151', fontSize: 14 },
-  actions: { flexDirection: 'row', gap: 12 },
-  btnDecline: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#EF4444', alignItems: 'center' },
-  btnDeclineText: { color: '#EF4444', fontWeight: 'bold' },
-  btnAccept: { flex: 2, padding: 16, backgroundColor: '#1D4ED8', borderRadius: 12, alignItems: 'center' },
-  btnAcceptText: { color: 'white', fontWeight: 'bold', fontSize: 16 }
+  // Botones y Tarjetas
+  bottomContainer: { position: 'absolute', bottom: 40, width: '100%', paddingHorizontal: 20 },
+  mainActionBtn: { 
+    backgroundColor: '#1D4ED8', 
+    padding: 20, 
+    borderRadius: 20, 
+    alignItems: 'center', 
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10
+  },
+  mainActionText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+
+  confirmCard: {
+    backgroundColor: 'white',
+    padding: 25,
+    borderRadius: 30,
+    elevation: 20,
+    shadowColor: '#000',
+  },
+  routeInfoTitle: { fontSize: 14, color: '#6B7280', fontWeight: 'bold', marginBottom: 10 },
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  priceText: { fontSize: 32, fontWeight: '900', color: '#10B981' },
+  timeText: { fontSize: 16, color: '#1E3A8A', fontWeight: '600' },
+  btnConfirm: { backgroundColor: '#1D4ED8', padding: 18, borderRadius: 15, alignItems: 'center' },
+  btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  btnCancel: { marginTop: 15, alignItems: 'center' },
+  btnCancelText: { color: '#EF4444', fontWeight: 'bold' }
 });
