@@ -1,8 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../utils/context/AuthContext';
 
 export default function ProfileScreen() {
+  const { logout } = useAuth();
+  
+  const handleLogout = () => {
+    logout();
+    alert("Sesión cerrada");
+  }
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
@@ -39,7 +46,7 @@ export default function ProfileScreen() {
         <MenuOption icon="card-outline" title="Métodos de pago" />
         <MenuOption icon="notifications-outline" title="Notificaciones" />
         <MenuOption icon="help-circle-outline" title="Soporte técnico" />
-        <TouchableOpacity style={styles.logoutBtn}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>

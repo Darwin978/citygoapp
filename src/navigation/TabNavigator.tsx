@@ -7,14 +7,16 @@ import { View, Text, StyleSheet } from 'react-native';
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const Tab = createBottomTabNavigator();
 
 export default function TabNavigator() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerShown: true,
+        headerShown: false,
         // Estilo de la cabecera superior (Header)
         headerStyle: { 
           backgroundColor: '#1D4ED8',
@@ -40,9 +42,9 @@ export default function TabNavigator() {
           marginBottom: 5,
         },
         tabBarStyle: { 
-          height: 70, 
+          height: 60 + insets.bottom, // Aumenta la altura para incluir el área segura
           paddingTop: 10,
-          paddingBottom: 10,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 20, // Asegura espacio para el área segura
           borderTopWidth: 1,
           borderTopColor: '#E5E7EB',
           backgroundColor: 'white',
@@ -52,7 +54,7 @@ export default function TabNavigator() {
           let iconName: any;
 
           if (route.name === 'Mapa') {
-            iconName = focused ? 'map' : 'map-outline';
+            iconName = focused ? 'map' : 'map';
           } else if (route.name === 'Mensajes') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           } else if (route.name === 'Perfil') {
@@ -61,7 +63,11 @@ export default function TabNavigator() {
 
           return (
             <View style={focused ? styles.activeTabIcon : null}>
-              <Ionicons name={iconName} size={24} color={color} />
+              <Ionicons 
+                name={iconName} 
+                size={24} // Usamos el size que viene por defecto
+                color={focused ? '#1D4ED8' : '#9CA3AF'} // Este color es #1D4ED8 cuando focused es true
+              />
             </View>
           );
         },
@@ -82,15 +88,12 @@ export default function TabNavigator() {
         component={ProfileScreen} 
         options={{ title: 'Mi Perfil' }}
       />
-    </Tab.Navigator>
+      </Tab.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
   activeTabIcon: {
-    backgroundColor: '#DBEAFE', // Un azul muy claro para resaltar el icono activo
-    paddingHorizontal: 15,
-    paddingVertical: 4,
-    borderRadius: 20,
+    backgroundColor: 'transparent', // Azul claro de fondo
   }
 });

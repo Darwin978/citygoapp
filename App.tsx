@@ -18,6 +18,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { PermissionProvider, usePermissions } from './utils/context/PermissionContext';
 import * as SplashScreen from 'expo-splash-screen';
 import LoadingScreen from './src/screens/LoadingScreen';
+import TabNavigator from './src/navigation/TabNavigator';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -202,7 +203,7 @@ function RootNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {isLoggedIn ? ( 
         isApproved ? (
-          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="MainTabs" component={TabNavigator} />
         ) : (
           <Stack.Screen name="Pending" component={PendingApprovalScreen} />
         )

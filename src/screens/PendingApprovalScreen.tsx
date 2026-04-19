@@ -1,23 +1,30 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getUserInfoApi } from '../../utils/services/userService';
+import { getUserInfoApi, getUserInfoApproved } from '../../utils/services/userService';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from '../../utils/context/AuthContext';
 
 export default function PendingApprovalScreen({ navigation }: any) {
-  const { aproveed } = useAuth()
+  const { aproveed, login, logout } = useAuth()
   useEffect(() => {
     handleGetInfo();
+    const intervalTime = 1000 * 60 * 1; // Cada 1 minutos
+
+    const interval = setInterval(handleGetInfo, intervalTime);
+
+    return () => clearInterval(interval);
   }, []);
   
   async function handleGetInfo() {
     try {
       const token = await AsyncStorage.getItem('authToken') || '';
-      const response = await getUserInfoApi(token);
+      const response = await getUserInfoApproved(token);
+      console.log(response);
+      
       if (response.isApproved) {
         aproveed(true);
-        navigation.replace('Home');
+        login()
       }
     } catch (error) {
       console.error("Error fetching user info:", error);
@@ -44,7 +51,7 @@ export default function PendingApprovalScreen({ navigation }: any) {
       </Text>
       <Text style={styles.timer}>Tiempo estimado: 24-48 horas.</Text>
 
-      <TouchableOpacity style={styles.closeButton} onPress={() => navigation.navigate('Welcome')}>
+      <TouchableOpacity style={styles.closeButton} onPress={logout}>
         <Text style={styles.closeButtonText}>Cerrar</Text>
       </TouchableOpacity>
     </View>

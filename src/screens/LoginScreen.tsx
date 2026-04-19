@@ -29,7 +29,13 @@ export default function LoginScreen({ navigation }: any) {
     }
 
     try {
+      console.log(email);
+      console.log(password);
+      
+      
       const response = await loginApi(email, password);
+
+      console.log("Login exitoso:", response);
       
       let authToken = response.access_token;
       let user = response.user;
