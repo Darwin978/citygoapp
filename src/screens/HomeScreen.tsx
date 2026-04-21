@@ -12,6 +12,7 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
+import { getPriceApi } from '../../utils/services/ridesServices';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
@@ -21,9 +22,14 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [region, setRegion] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(false);
-  const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'ON_RIDE'>('PICKUP');
+  const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE'>('PICKUP');
   const [role, setRole] = useState<string | null>(null);
   const [routeDetails, setRouteDetails] = useState<any>(null);
+  const [price, setPrice] = useState<number>(0);
+  const [distance, setDistance] = useState<number>(0);
+  const [time, setTime] = useState<number>(0);
+  const [error, setError] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD'>('CASH');
 
   // Coordenadas
   const [pickupCoords, setPickupCoords] = useState<any>(null);
@@ -107,7 +113,7 @@ export default function HomeScreen() {
 
   // --- FUNCIONES DE APOYO ---
 
-  const handleAction = () => {
+  const handleAction = async () => {
     if (status === 'IDLE' || status === 'PICKUP') {
       const coords = { latitude: region.latitude, longitude: region.longitude };
       setPickupCoords(coords);
@@ -115,9 +121,9 @@ export default function HomeScreen() {
       setStatus('DESTINATION');
     } else if (status === 'DESTINATION') {
       const coords = { latitude: region.latitude, longitude: region.longitude };
-      setDestinationCoords(coords);
-      getAddressFromCoords(coords.latitude, coords.longitude, false);
-      setStatus('ROUTE');
+      await setDestinationCoords(coords);
+      await getAddressFromCoords(coords.latitude, coords.longitude, false);
+      await getPrice(coords);
     }
   };
 
@@ -162,6 +168,38 @@ export default function HomeScreen() {
       console.warn("Could not get user location", e);
     }
   };
+
+  const getPrice = async (destinationCoords: { latitude: number, longitude: number }) => {
+    try {
+      const price = await getPriceApi(pickupCoords.latitude, pickupCoords.longitude, destinationCoords.latitude, destinationCoords.longitude);
+      setPrice(price.total);
+      setDistance(price.distance);
+      setTime(price.duration);
+      setError(null);
+      setStatus('ROUTE');
+
+    } catch (e) {
+      setPrice(0);
+      setDistance(0);
+      setTime(0);
+      setError("TUVIMOS UN PROBLEMA AL OBTENER EL PRECIO, PERO EL CONDUCTOR TE DARA SU MEJOR TARIFA SI DECIDES CONTINUAR!");
+      console.warn("Could not get price", e);
+      setStatus('ROUTE');
+    }
+  };
+
+  const handleCancelTrip = async () => {
+    try {
+      Alert.alert('CityGo', '¿Estás seguro de cancelar el viaje?');
+      //const response = await cancelTripApi(id);
+      console.log("Viaje cancelado:");
+      setStatus('ROUTE');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+
 
   if (!region || !role) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#1D4ED8" />;
 
@@ -215,7 +253,7 @@ export default function HomeScreen() {
       </MapView>
 
       {/* Buscadores Flotantes */}
-      {status !== 'ROUTE' && status !== 'ON_RIDE' && (
+      {status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING' && (
         <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
           <GooglePlacesAutocomplete
             ref={pickupSearchRef}
@@ -262,9 +300,9 @@ export default function HomeScreen() {
       )}
 
       {/* Botón de Mi Ubicación */}
-      {status !== 'ROUTE' && status !== 'ON_RIDE' && (
-        <TouchableOpacity 
-          style={[styles.myLocationBtn, { bottom: insets.bottom + 100 }]} 
+      {status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING' && (
+        <TouchableOpacity
+          style={[styles.myLocationBtn, { bottom: insets.bottom + 100 }]}
           onPress={centerOnUserLocation}
         >
           <Ionicons name="locate" size={26} color="#1D4ED8" />
@@ -273,14 +311,47 @@ export default function HomeScreen() {
 
       {/* Botón de Acción Principal / Card de Precio */}
       <View style={[styles.bottomContainer, { bottom: insets.bottom + 20 }]}>
-        {status === 'ROUTE' ? (
+        {status === 'SEARCHING' ? (
+          <View style={styles.searchingCard}>
+            <ActivityIndicator size="large" color="#1D4ED8" style={{ marginBottom: 15 }} />
+            <Text style={styles.searchingTitle}>Buscando conductor...</Text>
+            <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
+            <TouchableOpacity
+              style={styles.btnCancelSearch}
+              onPress={() => handleCancelTrip()}
+            >
+              <Text style={styles.btnCancelSearchText}>Cancelar viaje GO!</Text>
+            </TouchableOpacity>
+          </View>
+        ) : status === 'ROUTE' ? (
           <View style={styles.confirmCard}>
-            <Text style={styles.priceText}>${(1.5 + (routeDetails?.distance * 0.5)).toFixed(2)}</Text>
-            <TouchableOpacity style={styles.btnConfirm} onPress={() => Alert.alert("CityGo", "Solicitando...")}>
+            <Text style={styles.priceText}>${price.toFixed(2)}</Text>
+            <Text style={styles.distanceText}>{distance}</Text>
+            <Text style={styles.timeText}>{error ? error : time}</Text>
+
+            {/* Opciones de Pago */}
+            <View style={styles.paymentContainer}>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMethod === 'CASH' && styles.paymentBtnActive]}
+                onPress={() => setPaymentMethod('CASH')}
+              >
+                <Ionicons name="cash-outline" size={20} color={paymentMethod === 'CASH' ? 'white' : '#1D4ED8'} />
+                <Text style={[styles.paymentText, paymentMethod === 'CASH' && styles.paymentTextActive]}>Efectivo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.paymentBtn, paymentMethod === 'CARD' && styles.paymentBtnActive]}
+                onPress={() => setPaymentMethod('CARD')}
+              >
+                <Ionicons name="card-outline" size={20} color={paymentMethod === 'CARD' ? 'white' : '#1D4ED8'} />
+                <Text style={[styles.paymentText, paymentMethod === 'CARD' && styles.paymentTextActive]}>Tarjeta</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={styles.btnConfirm} onPress={() => setStatus('SEARCHING')}>
               <Text style={styles.btnText}>Confirmar Viaje</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.btnCancel} 
+            <TouchableOpacity
+              style={styles.btnCancel}
               onPress={() => {
                 setStatus('PICKUP');
                 setDestinationCoords(null);
@@ -366,7 +437,70 @@ const styles = StyleSheet.create({
   routeInfoTitle: { fontSize: 14, color: '#6B7280', fontWeight: 'bold', marginBottom: 10 },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   priceText: { fontSize: 32, fontWeight: '900', color: '#10B981' },
-  timeText: { fontSize: 16, color: '#1E3A8A', fontWeight: '600' },
+  timeText: { fontSize: 15, color: '#1E3A8A', fontWeight: '600' },
+  distanceText: { fontSize: 15, color: '#1E3A8A', fontWeight: '600' },
+
+  paymentContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 15,
+    gap: 10,
+  },
+  paymentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#1D4ED8',
+    borderRadius: 10,
+    gap: 8,
+  },
+  paymentBtnActive: {
+    backgroundColor: '#1D4ED8',
+  },
+  paymentText: {
+    color: '#1D4ED8',
+    fontWeight: 'bold',
+  },
+  paymentTextActive: {
+    color: 'white',
+  },
+
+  searchingCard: {
+    backgroundColor: 'white',
+    padding: 30,
+    borderRadius: 30,
+    elevation: 20,
+    shadowColor: '#000',
+    alignItems: 'center',
+  },
+  searchingTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1E3A8A',
+    marginBottom: 10,
+  },
+  searchingSubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  btnCancelSearch: {
+    padding: 15,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 15,
+    width: '100%',
+    alignItems: 'center',
+  },
+  btnCancelSearchText: {
+    color: '#EF4444',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+
   btnConfirm: { backgroundColor: '#1D4ED8', padding: 18, borderRadius: 15, alignItems: 'center' },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   btnCancel: { marginTop: 15, alignItems: 'center' },

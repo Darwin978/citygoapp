@@ -4,12 +4,12 @@ import { View, Image } from 'react-native';
 
 
 const LoadingScreen = () => {
-    return <View style={{ flex: 1 }}>
+    return <View style={{ flex: 1, backgroundColor: 'white' }}>
         <Image
-            source={require('../../assets/logo.png')}
-            style={{ flex: 1, width: '100%', height: '100%' }}
+            source={require('../../assets/splash-icon.gif')}
+            style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
-        />  
+        />
     </View>;
 };
 

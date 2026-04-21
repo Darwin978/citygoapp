@@ -1,11 +1,34 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/context/AuthContext';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from '../../utils/services/apiConfig';
+import { getUserInfoApi } from '../../utils/services/userService';
 export default function ProfileScreen() {
   const { logout } = useAuth();
-  
+  const [user, setUser] = useState<any>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      getUserInfo(); // Cargar inmediatamente al entrar a la pestaña
+      const interval = setInterval(() => {
+        getUserInfo();
+      }, 10000);
+      return () => clearInterval(interval);
+    }, [])
+  );
+
+  const getUserInfo = async () => {
+    const token = await AsyncStorage.getItem('authToken');
+    if (token) {
+      const response = await getUserInfoApi(token)
+      console.log("response", response)
+      setUser(response);
+    }
+  }
+
   const handleLogout = () => {
     logout();
     alert("Sesión cerrada");
@@ -14,9 +37,9 @@ export default function ProfileScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <View style={styles.imageContainer}>
-          <Image 
-            source={{ uri: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400' }} 
-            style={styles.profileImg} 
+          <Image
+            source={{ uri: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400' }}
+            style={styles.profileImg}
           />
           <TouchableOpacity style={styles.editBadge}>
             <Ionicons name="camera" size={18} color="white" />
@@ -74,7 +97,7 @@ const styles = StyleSheet.create({
   editBadge: { position: 'absolute', bottom: 0, right: 5, backgroundColor: '#1D4ED8', padding: 8, borderRadius: 20 },
   name: { fontSize: 22, fontWeight: 'bold', color: '#1E3A8A' },
   phone: { color: '#6B7280', marginTop: 4 },
-  
+
   statsRow: { flexDirection: 'row', paddingVertical: 25, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   statItem: { flex: 1, alignItems: 'center' },
   borderLateral: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#F3F4F6' },

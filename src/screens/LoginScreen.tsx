@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  SafeAreaView, 
-  Alert, 
-  KeyboardAvoidingView, 
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  KeyboardAvoidingView,
   Platform,
-  Image 
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { loginApi } from '../../utils/services/userService';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from '../../utils/context/AuthContext';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen({ navigation }: any) {
   const { login, aproveed } = useAuth()
@@ -31,12 +31,12 @@ export default function LoginScreen({ navigation }: any) {
     try {
       console.log(email);
       console.log(password);
-      
-      
+
+
       const response = await loginApi(email, password);
 
       console.log("Login exitoso:", response);
-      
+
       let authToken = response.access_token;
       let user = response.user;
 
@@ -45,7 +45,7 @@ export default function LoginScreen({ navigation }: any) {
       await AsyncStorage.setItem('role', user.role);
       login();
       aproveed(user.isApproved);
-      
+
     } catch (error) {
       Alert.alert("Error", "Credenciales incorrectas, por favor intenta de nuevo");
     }
@@ -54,14 +54,14 @@ export default function LoginScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.inner}
       >
         {/* Header con el Logo */}
         <View style={styles.header}>
-          <Image 
-            source={require('../../assets/logo_fondo.png')} 
+          <Image
+            source={require('../../assets/logo_fondo.png')}
             style={styles.logoSmall}
             resizeMode="contain"
           />
@@ -74,8 +74,8 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.inputLabel}>Correo Electrónico</Text>
           <View style={styles.inputContainer}>
             <Ionicons name="mail-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
-            <TextInput 
-              placeholder="ejemplo@correo.com" 
+            <TextInput
+              placeholder="ejemplo@correo.com"
               style={styles.input}
               value={email}
               onChangeText={setEmail}
@@ -88,8 +88,8 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.inputLabel}>Contraseña</Text>
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
-            <TextInput 
-              placeholder="••••••••" 
+            <TextInput
+              placeholder="••••••••"
               style={styles.input}
               value={password}
               onChangeText={setPassword}
@@ -134,25 +134,25 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginLeft: 4,
   },
-  inputContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#F3F4F6', 
-    borderRadius: 15, 
-    marginBottom: 10, 
-    paddingHorizontal: 15, 
-    borderWidth: 1, 
-    borderColor: '#E5E7EB' 
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 15,
+    marginBottom: 10,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderColor: '#E5E7EB'
   },
   inputIcon: { marginRight: 10 },
   input: { flex: 1, paddingVertical: 15, fontSize: 16, color: '#1F2937' },
   forgotBtn: { alignSelf: 'flex-end', marginBottom: 30 },
   forgotText: { color: '#1D4ED8', fontWeight: '600', fontSize: 14 },
-  loginBtn: { 
-    backgroundColor: '#1D4ED8', 
-    padding: 18, 
-    borderRadius: 15, 
-    alignItems: 'center', 
+  loginBtn: {
+    backgroundColor: '#1D4ED8',
+    padding: 18,
+    borderRadius: 15,
+    alignItems: 'center',
     elevation: 4,
     shadowColor: '#1D4ED8',
     shadowOffset: { width: 0, height: 4 },
