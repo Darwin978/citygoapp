@@ -10,7 +10,7 @@ export async function loginApi(email: string, password: string) {
             },
             body: JSON.stringify({ email, password }),
         });
-        
+
         if (!response.ok) {
             throw new Error('Login failed');
         }
@@ -62,14 +62,14 @@ export async function getUserInfoApproved(token: string) {
 export async function registerClientApi(formData: any) {
     try {
         console.log("Ingresa registro cliente");
-        
+
         const response = await axios.post(endPoint.registerClient, formData, {
             headers: {
                 'Accept': 'application/json',
                 'Content-Type': 'multipart/form-data'
             },
         });
-        
+
         if (!response.status || response.status < 200 || response.status >= 300) {
             throw new Error('Registration failed');
         }
@@ -91,7 +91,7 @@ export async function registerDriverApi(formData: any) {
                 'Content-Type': 'application/json',
             },
         });
-        
+
         if (!response.ok) {
             throw new Error('Registration failed');
         }

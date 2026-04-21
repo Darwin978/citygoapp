@@ -34,6 +34,7 @@ export default function HomeScreen() {
   // Coordenadas
   const [pickupCoords, setPickupCoords] = useState<any>(null);
   const [destinationCoords, setDestinationCoords] = useState<any>(null);
+  const [myLocation, setMyLocation] = useState<any>(null);
 
   // Sockets y Seguimiento
   const socket = useRef<any>(null);
@@ -84,9 +85,17 @@ export default function HomeScreen() {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       });
+      setMyLocation({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        heading: loc.coords.heading || 0,
+      });
       getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
       const savedRole = await AsyncStorage.getItem('role');
       setRole(savedRole);
+      if (savedRole === Roles.DRIVER) {
+        setIsOnline(true);
+      }
     })();
   }, []);
 
@@ -103,6 +112,7 @@ export default function HomeScreen() {
               longitude: location.coords.longitude,
               heading: location.coords.heading,
             };
+            setMyLocation(coords);
             socket.current.emit('updateLocation', { rideId: currentRideId, coords });
           }
         );
@@ -199,6 +209,16 @@ export default function HomeScreen() {
     }
   };
 
+  const handleChangeRoute = () => {
+    setStatus('PICKUP');
+    setPickupCoords(null);
+    setDestinationCoords(null);
+    setRouteDetails(null);
+    pickupSearchRef.current?.setAddressText('');
+    destinationSearchRef.current?.setAddressText('');
+    centerOnUserLocation();
+  };
+
 
 
   if (!region || !role) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#1D4ED8" />;
@@ -233,6 +253,18 @@ export default function HomeScreen() {
           </Marker.Animated>
         )}
 
+        {/* Marcador del propio Conductor (Cuando está Online) */}
+        {role === Roles.DRIVER && isOnline && myLocation && (
+          <Marker
+            coordinate={myLocation}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={{ transform: [{ rotate: `${myLocation.heading || 0}deg` }] }}>
+              <Image source={CarIcon} style={{ width: 40, height: 40 }} resizeMode="contain" />
+            </View>
+          </Marker>
+        )}
+
         {/* Puntos de Ruta */}
         {pickupCoords && <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#1D4ED8" /></Marker>}
         {destinationCoords && <Marker coordinate={destinationCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#EF4444" /></Marker>}
@@ -252,8 +284,23 @@ export default function HomeScreen() {
         )}
       </MapView>
 
+      {/* Driver Interface - Online Toggle */}
+      {role === Roles.DRIVER && (isOnline || (status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING')) && (
+        <View style={[styles.driverInterface, { top: insets.top + (isOnline ? 10 : 150), zIndex: isOnline ? 2000 : 900 }]}>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusText}>{isOnline ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}</Text>
+            <Switch
+              value={isOnline}
+              onValueChange={setIsOnline}
+              trackColor={{ false: "#767577", true: "#81b0ff" }}
+              thumbColor={isOnline ? "#1D4ED8" : "#f4f3f4"}
+            />
+          </View>
+        </View>
+      )}
+
       {/* Buscadores Flotantes */}
-      {status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING' && (
+      {!isOnline && status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING' && (
         <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
           <GooglePlacesAutocomplete
             ref={pickupSearchRef}
@@ -293,7 +340,7 @@ export default function HomeScreen() {
       )}
 
       {/* Pin Fijo Central */}
-      {(status === 'PICKUP' || status === 'DESTINATION' || status === 'IDLE') && (
+      {!isOnline && (status === 'PICKUP' || status === 'DESTINATION' || status === 'IDLE') && (
         <View style={styles.markerFixed} pointerEvents="none">
           <Ionicons name="location" size={50} color={status === 'DESTINATION' ? "#EF4444" : "#1D4ED8"} />
         </View>
@@ -310,7 +357,7 @@ export default function HomeScreen() {
       )}
 
       {/* Botón de Acción Principal / Card de Precio */}
-      <View style={[styles.bottomContainer, { bottom: insets.bottom + 20 }]}>
+      <View style={[styles.bottomContainer, { bottom: insets.bottom + 0 }]}>
         {status === 'SEARCHING' ? (
           <View style={styles.searchingCard}>
             <ActivityIndicator size="large" color="#1D4ED8" style={{ marginBottom: 15 }} />
@@ -352,18 +399,13 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.btnCancel}
-              onPress={() => {
-                setStatus('PICKUP');
-                setDestinationCoords(null);
-                setRouteDetails(null);
-                destinationSearchRef.current?.setAddressText('');
-              }}
+              onPress={handleChangeRoute}
             >
               <Text style={styles.btnCancelText}>Cambiar Ruta / Cancelar</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          role === Roles.USER && (
+          !isOnline && (
             <TouchableOpacity style={styles.mainActionBtn} onPress={handleAction}>
               <Text style={styles.mainActionText}>
                 {(status === 'IDLE' || status === 'PICKUP') ? 'Confirmar Recogida' : 'Confirmar Destino'}

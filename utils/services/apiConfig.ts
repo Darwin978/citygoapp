@@ -1,6 +1,6 @@
 import { requestRide } from "./ridesServices";
 
-export const BACKEND_URL = process.env.BACKEND_URL || 'http://192.168.1.150:3000';
+export const BACKEND_URL = process.env.BACKEND_URL || 'https://api.citygoec.com';
 
 export const endPoint = {
     login: `${BACKEND_URL}/auth/login`,

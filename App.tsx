@@ -20,8 +20,6 @@ import * as SplashScreen from 'expo-splash-screen';
 import LoadingScreen from './src/screens/LoadingScreen';
 import TabNavigator from './src/navigation/TabNavigator';
 
-SplashScreen.preventAutoHideAsync();
-
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,

@@ -21,8 +21,10 @@ export default function LoginScreen({ navigation }: any) {
   const { login, aproveed } = useAuth()
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    setLoading(true);
     if (!email || !password) {
       Alert.alert("Error", "Por favor completa todos los campos");
       return;
@@ -48,6 +50,8 @@ export default function LoginScreen({ navigation }: any) {
 
     } catch (error) {
       Alert.alert("Error", "Credenciales incorrectas, por favor intenta de nuevo");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -102,8 +106,8 @@ export default function LoginScreen({ navigation }: any) {
             <Text style={styles.forgotText}>¿Olvidaste tu contraseña?</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
-            <Text style={styles.loginBtnText}>Entrar</Text>
+          <TouchableOpacity disabled={loading} style={styles.loginBtn} onPress={handleLogin}>
+            <Text style={styles.loginBtnText}>{loading ? "Iniciando sesión..." : "Entrar"}</Text>
           </TouchableOpacity>
         </View>
 

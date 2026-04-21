@@ -4,13 +4,13 @@
     "slug": "cityGoApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "resizeMode": "cover",
+      "backgroundColor": "#000000",
+      "image": "./assets/negro.jpg"
     },
     "ios": {
       "supportsTablet": true,
@@ -18,15 +18,30 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
       },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "FOREGROUND_SERVICE"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.citygo"
+      "package": "com.citygo",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "aa054fc9-3b9d-4bae-b934-c1b960d00147"
+      }
     }
   }
 }
