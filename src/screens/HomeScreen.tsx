@@ -12,11 +12,11 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { getPriceApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
-const SOCKET_URL = 'http://' + BACKEND_URL + ':3000'; // Tu backend NestJS
+const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -30,15 +30,24 @@ export default function HomeScreen() {
   const [time, setTime] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD'>('CASH');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [driverInfo, setDriverInfo] = useState<any>(null);
+
 
   // Coordenadas
   const [pickupCoords, setPickupCoords] = useState<any>(null);
   const [destinationCoords, setDestinationCoords] = useState<any>(null);
+  const [pickupAddress, setPickupAddress] = useState<string>('');
+  const [destinationAddress, setDestinationAddress] = useState<string>('');
   const [myLocation, setMyLocation] = useState<any>(null);
 
   // Sockets y Seguimiento
   const socket = useRef<any>(null);
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+
+  // Solicitudes de Viaje (Conductor)
+  const [pendingRequest, setPendingRequest] = useState<any>(null);
+  const [showRequestDialog, setShowRequestDialog] = useState<boolean>(false);
 
   // Animación del conductor (Para el cliente)
   const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -57,19 +66,39 @@ export default function HomeScreen() {
   useEffect(() => {
     socket.current = io(SOCKET_URL);
 
+    // 2. Listener para Conductores: Nueva solicitud de viaje
+    socket.current.on('newRideRequest', (req: any) => {
+      setPendingRequest(req);
+      setShowRequestDialog(true);
+    });
+
+    // 3. Listener para Clientes: El conductor aceptó el viaje
+    socket.current.on('trip_accepted', (data: any) => {
+      // Nos unimos a la sala del viaje para empezar a recibir coordenadas
+      socket.current.emit('joinRide', data.rideId);
+
+      setDriverInfo(data.driver);
+      setStatus('ON_RIDE');
+
+      Alert.alert("¡Conductor asignado!", `${data.driver.name} va en camino.`);
+    });
+
+    // 4. Listener Universal: Actualización de movimiento en el mapa
     socket.current.on('locationUpdated', (newCoords: any) => {
-      // Animación suave del coche
       if (Platform.OS === 'android') {
+        // Animación suave para que el coche no "salte" en las calles de Cuenca
         animatedDriverCoords.timing({
-          ...newCoords,
-          duration: 1000,
+          latitude: newCoords.latitude,
+          longitude: newCoords.longitude,
+          duration: 2000,
           useNativeDriver: false
-        }).start();
+        } as any).start();
       } else {
         setDriverLocation(newCoords);
       }
     });
 
+    // 5. Limpieza al desmontar el componente
     return () => socket.current.disconnect();
   }, []);
 
@@ -124,16 +153,19 @@ export default function HomeScreen() {
   // --- FUNCIONES DE APOYO ---
 
   const handleAction = async () => {
+    setLoading(true);
     if (status === 'IDLE' || status === 'PICKUP') {
       const coords = { latitude: region.latitude, longitude: region.longitude };
       setPickupCoords(coords);
       getAddressFromCoords(coords.latitude, coords.longitude, true);
       setStatus('DESTINATION');
+      setLoading(false);
     } else if (status === 'DESTINATION') {
       const coords = { latitude: region.latitude, longitude: region.longitude };
       await setDestinationCoords(coords);
       await getAddressFromCoords(coords.latitude, coords.longitude, false);
       await getPrice(coords);
+      setLoading(false);
     }
   };
 
@@ -143,7 +175,14 @@ export default function HomeScreen() {
       const data = await res.json();
       if (data.results[0]) {
         const addr = data.results[0].formatted_address;
-        isPickup ? pickupSearchRef.current?.setAddressText(addr) : destinationSearchRef.current?.setAddressText(addr);
+
+        if (isPickup) {
+          pickupSearchRef.current?.setAddressText(addr);
+          setPickupAddress(addr);
+        } else {
+          destinationSearchRef.current?.setAddressText(addr);
+          setDestinationAddress(addr);
+        }
       }
     } catch (e) { console.error(e); }
   };
@@ -198,15 +237,34 @@ export default function HomeScreen() {
     }
   };
 
-  const handleCancelTrip = async () => {
-    try {
-      Alert.alert('CityGo', '¿Estás seguro de cancelar el viaje?');
-      //const response = await cancelTripApi(id);
-      console.log("Viaje cancelado:");
-      setStatus('ROUTE');
-    } catch (e) {
-      console.error(e);
-    }
+  const handleCancelSolicitud = () => {
+    Alert.alert(
+      'CityGo',
+      '¿Estás seguro de cancelar la solicitud de viaje? Algunos conductores ya fueron notificados de tu solicitud',
+      [
+        {
+          text: 'No',
+          style: 'cancel',
+        },
+        {
+          text: 'Sí, cancelar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (currentRideId) {
+                const response = await cancelSolicitudApi(currentRideId);
+                console.log("Viaje cancelado:", response);
+              }
+              setStatus('ROUTE');
+              setCurrentRideId(null);
+            } catch (e) {
+              console.error(e);
+              Alert.alert('Error', 'Hubo un problema al cancelar la solicitud.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleChangeRoute = () => {
@@ -216,7 +274,34 @@ export default function HomeScreen() {
     setRouteDetails(null);
     pickupSearchRef.current?.setAddressText('');
     destinationSearchRef.current?.setAddressText('');
+    setPickupAddress('');
+    setDestinationAddress('');
     centerOnUserLocation();
+  };
+
+  const handleRequestRide = async () => {
+    try {
+      setLoading(true);
+      const data = {
+        originAddress: pickupAddress,
+        destinationAddress: destinationAddress,
+        originLat: region.latitude,
+        originLng: region.longitude,
+        destLat: destinationCoords.latitude,
+        destLng: destinationCoords.longitude,
+        finalPrice: price,
+      }
+      console.log("Data enviada:", data);
+      const response = await requestRideApi(data);
+      console.log("Respuesta de la API:", response);
+      setCurrentRideId(response.id);
+      setStatus('SEARCHING');
+
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -265,6 +350,16 @@ export default function HomeScreen() {
           </Marker>
         )}
 
+        {/* Marcador de Solicitud Entrante para el Conductor */}
+        {role === Roles.DRIVER && isOnline && pendingRequest && (
+          <Marker
+            coordinate={{ latitude: pendingRequest.originLat, longitude: pendingRequest.originLng }}
+            onPress={() => setShowRequestDialog(true)}
+          >
+            <Ionicons name="person-circle" size={50} color="#10B981" />
+          </Marker>
+        )}
+
         {/* Puntos de Ruta */}
         {pickupCoords && <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#1D4ED8" /></Marker>}
         {destinationCoords && <Marker coordinate={destinationCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#EF4444" /></Marker>}
@@ -306,7 +401,10 @@ export default function HomeScreen() {
             ref={pickupSearchRef}
             placeholder="¿Recogida?"
             fetchDetails={true}
-            onPress={(data, details) => moveToLocation(details, true)}
+            onPress={(data, details) => {
+              setPickupAddress(data.description || details?.formatted_address || '');
+              moveToLocation(details, true);
+            }}
             query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
             styles={{
               container: { flex: 0, width: '100%', marginBottom: 10, zIndex: 2 },
@@ -323,7 +421,10 @@ export default function HomeScreen() {
             ref={destinationSearchRef}
             placeholder="¿Destino?"
             fetchDetails={true}
-            onPress={(data, details) => moveToLocation(details, false)}
+            onPress={(data, details) => {
+              setDestinationAddress(data.description || details?.formatted_address || '');
+              moveToLocation(details, false);
+            }}
             query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
             styles={{
               container: { flex: 0, width: '100%', zIndex: 1 },
@@ -365,7 +466,7 @@ export default function HomeScreen() {
             <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
             <TouchableOpacity
               style={styles.btnCancelSearch}
-              onPress={() => handleCancelTrip()}
+              onPress={() => handleCancelSolicitud()}
             >
               <Text style={styles.btnCancelSearchText}>Cancelar viaje GO!</Text>
             </TouchableOpacity>
@@ -394,8 +495,8 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.btnConfirm} onPress={() => setStatus('SEARCHING')}>
-              <Text style={styles.btnText}>Confirmar Viaje</Text>
+            <TouchableOpacity style={styles.btnConfirm} onPress={handleRequestRide} disabled={loading}>
+              {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Confirmar Viaje</Text>}
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.btnCancel}
@@ -406,14 +507,61 @@ export default function HomeScreen() {
           </View>
         ) : (
           !isOnline && (
-            <TouchableOpacity style={styles.mainActionBtn} onPress={handleAction}>
+            <TouchableOpacity style={styles.mainActionBtn} onPress={handleAction} disabled={loading}>
               <Text style={styles.mainActionText}>
-                {(status === 'IDLE' || status === 'PICKUP') ? 'Confirmar Recogida' : 'Confirmar Destino'}
+                {loading ? <ActivityIndicator color="white" /> : (status === 'IDLE' || status === 'PICKUP') ? 'Confirmar Recogida' : 'Confirmar Destino'}
               </Text>
             </TouchableOpacity>
           )
         )}
       </View>
+
+      {/* Diálogo de Nueva Solicitud (Conductor) */}
+      {role === Roles.DRIVER && isOnline && pendingRequest && showRequestDialog && (
+        <View style={[styles.bottomContainer, { bottom: insets.bottom + 0, zIndex: 3000 }]}>
+          <View style={styles.confirmCard}>
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 15, right: 15, zIndex: 10 }}
+              onPress={() => setShowRequestDialog(false)}
+            >
+              <Ionicons name="close" size={28} color="#6B7280" />
+            </TouchableOpacity>
+
+            <Text style={[styles.searchingTitle, { color: '#10B981', textAlign: 'center', marginBottom: 5 }]}>¡Nueva Solicitud de Viaje!</Text>
+
+            <View style={{ marginBottom: 10, marginTop: 10 }}>
+              <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Recogida:</Text>
+              <Text style={{ color: '#6B7280' }}>{pendingRequest.originAddress || 'Cargando...'}</Text>
+            </View>
+
+            <View style={{ marginBottom: 15 }}>
+              <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Destino:</Text>
+              <Text style={{ color: '#6B7280' }}>{pendingRequest.destinationAddress || 'Cargando...'}</Text>
+            </View>
+
+            <View style={[styles.priceRow, { justifyContent: 'center', marginBottom: 20 }]}>
+              <Text style={styles.priceText}>${(pendingRequest.finalPrice || pendingRequest.price || 0).toFixed(2)}</Text>
+              {pendingRequest.distance && <Text style={[styles.distanceText, { marginLeft: 10 }]}>{pendingRequest.distance}</Text>}
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
+              <TouchableOpacity style={[styles.btnCancelSearch, { flex: 1, padding: 15 }]} onPress={() => {
+                setPendingRequest(null);
+                setShowRequestDialog(false);
+              }}>
+                <Text style={styles.btnCancelSearchText}>Declinar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btnConfirm, { flex: 1, padding: 15 }]} onPress={() => {
+                Alert.alert("Aceptado", "Has aceptado el viaje. Dirígete al punto de recogida.");
+                setShowRequestDialog(false);
+                // Opcional: Cambiar estado a 'ON_RIDE'
+              }}>
+                <Text style={styles.btnText}>Aceptar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

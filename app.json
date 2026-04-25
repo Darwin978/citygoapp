@@ -24,7 +24,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "SYSTEM_ALERT_WINDOW"
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -42,6 +43,14 @@
       "eas": {
         "projectId": "aa054fc9-3b9d-4bae-b934-c1b960d00147"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/notificacion.mp3"]
+        }
+      ]
+    ]
   }
 }

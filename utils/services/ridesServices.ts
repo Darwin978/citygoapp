@@ -1,5 +1,6 @@
 import axios from "axios";
 import { endPoint } from "./apiConfig";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface requestRideDto {
     originAddress: string,
@@ -10,12 +11,14 @@ interface requestRideDto {
     destLng: number,
     finalPrice: number,
 }
-export async function requestRide(data: requestRideDto) {
+export async function requestRideApi(data: requestRideDto) {
     try {
+        const token = await AsyncStorage.getItem('authToken');
         const response = await fetch(endPoint.requestRide, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
             },
             body: JSON.stringify(data),
         });
@@ -54,6 +57,29 @@ export async function getPriceApi(originLat: number, originLng: number, destLat:
         return responseData;
     } catch (error) {
         console.error('Error during price fetch:', error);
+        throw error;
+    }
+}
+
+export async function cancelSolicitudApi(id: string) {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(endPoint.cancelSolicitud + `/${id}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error('CANCEL SOLICITUD ERROR');
+        }
+
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.error('Error during cancel solicitud:', error);
         throw error;
     }
 }

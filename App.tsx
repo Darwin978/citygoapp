@@ -28,7 +28,7 @@ Notifications.setNotificationHandler({
     // Estas son las que te pide el error:
     shouldShowBanner: true,
     shouldShowList: true,
-    priority: AndroidNotificationPriority.MAX,
+    priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 });
 
@@ -38,7 +38,12 @@ if (Platform.OS === 'android') {
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#FF231F7C',
-    sound: 'default', // Aquí podrías poner un sonido personalizado de "taxi"
+    sound: 'notificacion.mp3', // Sonido personalizado
+    bypassDnd: true, // Ayuda a saltar el modo 'No Molestar' si el usuario da permiso
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.ALARM, // Frecuentemente suena aunque el celular esté en silencio
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+    },
   });
 }
 

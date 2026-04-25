@@ -22,21 +22,22 @@ export default function MessagesScreen() {
   };
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
       style={styles.container}
     >
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
+        style={{ flex: 1, marginTop: 20 }}
         renderItem={({ item }) => (
           <View style={[
-            styles.bubble, 
+            styles.bubble,
             item.sender === 'client' ? styles.clientBubble : styles.driverBubble
           ]}>
             <Text style={[
-              styles.messageText, 
+              styles.messageText,
               item.sender === 'client' ? styles.clientText : styles.driverText
             ]}>
               {item.text}
@@ -48,11 +49,12 @@ export default function MessagesScreen() {
       />
 
       <View style={styles.inputArea}>
-        <TextInput 
-          style={styles.input} 
+        <TextInput
+          style={styles.input}
           placeholder="Escribe un mensaje..."
           value={inputText}
           onChangeText={setInputText}
+          placeholderTextColor={'gray'}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
           <Ionicons name="send" size={24} color="white" />

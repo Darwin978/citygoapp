@@ -1,25 +1,24 @@
 import React, { useState } from 'react';
-import { 
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, 
-  Image, Alert, KeyboardAvoidingView, Platform 
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
+  Image, Alert, KeyboardAvoidingView, Platform
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { registerClientApi } from '../../utils/services/userService';
+import { registerClientApi, registerDriverApi } from '../../utils/services/userService';
 import { Roles } from '../../utils/services/rolesEnum';
 
 interface Vehicle {
-  placa: string;
-  marca: string;
-  modelo: string;
-  año: string;
+  plate: string;
+  brand: string;
+  model: string;
   color?: string;
 }
 
 export default function RegisterScreen({ navigation }: any) {
   const [role, setRole] = useState<'CLIENT' | 'DRIVER'>('CLIENT');
   const [cedulaImage, setCedulaImage] = useState<string | null>(null);
-  
+
   // Estados de datos
   const [nombre, setNombre] = useState('');
   const [cedula, setCedula] = useState('');
@@ -27,7 +26,7 @@ export default function RegisterScreen({ navigation }: any) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [vehicles, setVehicles] = useState<Vehicle[]>([{ placa: '', marca: '', modelo: '', año: '' }]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([{ plate: '', brand: '', model: '', color: '' }]);
 
   // Color constante para placeholders (Gris oscuro para fondo blanco)
   const placeholderColor = "#6B7280";
@@ -69,7 +68,7 @@ export default function RegisterScreen({ navigation }: any) {
     }
     if (role === Roles.DRIVER) {
       for (let v of vehicles) {
-        if (!v.placa || !v.marca || !v.modelo || !v.año) {
+        if (!v.plate || !v.brand || !v.model || !v.color) {
           return Alert.alert("Error", "Completa la información de todos los vehículos o elimina los que no uses.");
         }
       }
@@ -80,48 +79,48 @@ export default function RegisterScreen({ navigation }: any) {
       return Alert.alert("Seguridad", "La clave debe tener 8+ caracteres y al menos un número.");
     }
     if (password !== confirmPassword) return Alert.alert("Error", "Las claves no coinciden.");
-  const formData = new FormData();
-  
-  // Datos normales
-  formData.append('name', nombre);
+    const formData = new FormData();
+
+    // Datos normales
+    formData.append('name', nombre);
     formData.append('identificacion', cedula);
-  formData.append('email', email);
-  formData.append('telefono', phone);
-  formData.append('role', role);
+    formData.append('email', email);
+    formData.append('telefono', phone);
+    formData.append('role', role);
     formData.append('password', password);
     formData.append('vehicles', JSON.stringify(vehicles));
-  
-  // El archivo (cedula_file debe coincidir con el nombre en el interceptor de NestJS)
-  formData.append('cedula_file', {
-    uri: Platform.OS === 'android' ? cedulaImage : cedulaImage.replace('file://', ''),
-    type: 'image/jpeg', // O 'image/png' según la extensión
-    name: 'upload.jpg',
-  } as any);
+
+    // El archivo (cedula_file debe coincidir con el nombre en el interceptor de NestJS)
+    formData.append('cedula_file', {
+      uri: Platform.OS === 'android' ? cedulaImage : cedulaImage.replace('file://', ''),
+      type: 'image/jpeg', // O 'image/png' según la extensión
+      name: 'upload.jpg',
+    } as any);
 
     try {
-      if (role === Roles.DRIVER) { 
+      if (role === Roles.DRIVER) {
+        const response = await registerDriverApi(formData);
+      }
+      if (role === Roles.USER) {
         const response = await registerClientApi(formData);
       }
-      if (role === Roles.USER) { 
-        const response = await registerClientApi(formData);
-      }
-    
+
       Alert.alert("Registro Enviado", "Hemos almacenado tus datos ahora ya puedes iniciar sesión. Ten en cuenta que tu cuenta está pendiente de aprobación, te notificaremos una vez que sea aprobada.");
-    navigation.navigate('Login');
-  } catch (error) {
-    Alert.alert("Error", "No se pudo subir la información");
-  }
-};
+      navigation.navigate('Login');
+    } catch (error) {
+      Alert.alert("Error", "No se pudo subir la información");
+    }
+  };
 
   return (
-    <KeyboardAvoidingView 
-    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    style={{ flex: 1 }}
-    // Este offset es clave para que no tape el último input
-    keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0} 
-  >
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      // Este offset es clave para que no tape el último input
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+    >
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        
+
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="white" />
@@ -141,10 +140,10 @@ export default function RegisterScreen({ navigation }: any) {
         <View style={styles.form}>
           <Text style={styles.label}>Información Personal</Text>
           <TextInput placeholder="Nombre Completo" placeholderTextColor={placeholderColor} style={styles.input} onChangeText={setNombre} />
-          <TextInput 
-            placeholder="Cédula de Identidad" 
-            placeholderTextColor={placeholderColor} 
-            style={styles.input} 
+          <TextInput
+            placeholder="Cédula de Identidad"
+            placeholderTextColor={placeholderColor}
+            style={styles.input}
             keyboardType="numeric"
             maxLength={10}
             onChangeText={setCedula}
@@ -160,7 +159,7 @@ export default function RegisterScreen({ navigation }: any) {
             ) : (
               <>
                 <Ionicons name="id-card-outline" size={40} color="#1D4ED8" />
-                <Text style={{color: '#1D4ED8', fontWeight: '600'}}>Subir identificación</Text>
+                <Text style={{ color: '#1D4ED8', fontWeight: '600' }}>Subir identificación</Text>
               </>
             )}
           </TouchableOpacity>
@@ -171,11 +170,11 @@ export default function RegisterScreen({ navigation }: any) {
 
           {/* SECCIÓN VEHÍCULOS (CONDUCTOR) */}
           {role === 'DRIVER' && (
-            <View style={{marginTop: 10}}>
+            <View style={{ marginTop: 10 }}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.label}>Vehículos ({vehicles.length}/3)</Text>
                 {vehicles.length < 3 && (
-                  <TouchableOpacity onPress={() => setVehicles([...vehicles, {placa:'', marca:'', modelo:'', año:''}])}>
+                  <TouchableOpacity onPress={() => setVehicles([...vehicles, { plate: '', brand: '', model: '', color: '' }])}>
                     <Text style={styles.addText}>+ Añadir</Text>
                   </TouchableOpacity>
                 )}
@@ -183,31 +182,28 @@ export default function RegisterScreen({ navigation }: any) {
 
               {vehicles.map((v, i) => (
                 <View key={i} style={styles.vehicleCard}>
-                  <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                    <Text style={styles.vehicleTitle}>Auto {i+1}</Text>
-                    {i > 0 && <TouchableOpacity onPress={() => setVehicles(vehicles.filter((_, idx)=> idx !== i))}><Ionicons name="close-circle" size={20} color="red" /></TouchableOpacity>}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={styles.vehicleTitle}>Auto {i + 1}</Text>
+                    {i > 0 && <TouchableOpacity onPress={() => setVehicles(vehicles.filter((_, idx) => idx !== i))}><Ionicons name="close-circle" size={20} color="red" /></TouchableOpacity>}
                   </View>
-                  <TextInput 
-                    placeholder="Placa" 
-                    placeholderTextColor={placeholderColor} 
-                    style={styles.miniInput} 
+                  <TextInput
+                    placeholder="Placa"
+                    placeholderTextColor={placeholderColor}
+                    style={styles.miniInput}
                     autoCapitalize="characters"
                     onChangeText={(text) => {
-                      const newV = [...vehicles]; newV[i].placa = text; setVehicles(newV);
+                      const newV = [...vehicles]; newV[i].plate = text; setVehicles(newV);
                     }}
                   />
-                  <TextInput placeholder="Marca" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
-                      const newV = [...vehicles]; newV[i].marca = text; setVehicles(newV);
-                    }}/>
-                  <TextInput placeholder="Modelo" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
-                      const newV = [...vehicles]; newV[i].modelo = text; setVehicles(newV);
-                    }} />
-                  <TextInput placeholder="Año" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
-                      const newV = [...vehicles]; newV[i].año = text; setVehicles(newV);
-                    }} />
-                  <TextInput placeholder="Color" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
-                      const newV = [...vehicles]; newV[i].color = text; setVehicles(newV);
-                    }} />
+                  <TextInput placeholder="Marca Ej: Toyota" autoCapitalize="characters" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
+                    const newV = [...vehicles]; newV[i].brand = text; setVehicles(newV);
+                  }} />
+                  <TextInput placeholder="Modelo Ej: Corolla 2024" autoCapitalize="characters" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
+                    const newV = [...vehicles]; newV[i].model = text; setVehicles(newV);
+                  }} />
+                  <TextInput placeholder="Color Ej: Rojo" autoCapitalize="characters" placeholderTextColor={placeholderColor} style={styles.miniInput} onChangeText={(text) => {
+                    const newV = [...vehicles]; newV[i].color = text; setVehicles(newV);
+                  }} />
                 </View>
               ))}
             </View>

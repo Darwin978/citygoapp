@@ -3,6 +3,8 @@ import axios from 'axios';
 
 export async function loginApi(email: string, password: string) {
     try {
+        console.log(endPoint.login);
+        console.log("Ingresa login");
         const response = await fetch(endPoint.login, {
             method: 'POST',
             headers: {
@@ -84,19 +86,20 @@ export async function registerClientApi(formData: any) {
 
 export async function registerDriverApi(formData: any) {
     try {
-        const response = await fetch(endPoint.registerDriver, {
-            method: 'POST',
-            body: formData,
+        console.log("Ingresa registro conuctor");
+
+        const response = await axios.post(endPoint.registerDriver, formData, {
             headers: {
-                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Content-Type': 'multipart/form-data'
             },
         });
 
-        if (!response.ok) {
+        if (!response.status || response.status < 200 || response.status >= 300) {
             throw new Error('Registration failed');
         }
 
-        const data = await response.json();
+        const data = await response.data;
         return data;
     } catch (error) {
         console.error('Error during registration:', error);
