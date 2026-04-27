@@ -43,6 +43,7 @@ export default function LoginScreen({ navigation }: any) {
       let user = response.user;
 
       await AsyncStorage.setItem('authToken', authToken);
+      await AsyncStorage.setItem('userId', user.id);
       await AsyncStorage.setItem('email', user.email);
       await AsyncStorage.setItem('role', user.role);
       login();

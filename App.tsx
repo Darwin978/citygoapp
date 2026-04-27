@@ -19,6 +19,18 @@ import { PermissionProvider, usePermissions } from './utils/context/PermissionCo
 import * as SplashScreen from 'expo-splash-screen';
 import LoadingScreen from './src/screens/LoadingScreen';
 import TabNavigator from './src/navigation/TabNavigator';
+import * as Location from 'expo-location';
+
+
+Location.startLocationUpdatesAsync("LOCATION_TASK", {
+  accuracy: Location.Accuracy.High,
+  timeInterval: 15000, // 15 segundos para la DB
+  distanceInterval: 20, // o cada 20 metros
+  foregroundService: {
+    notificationTitle: "CityGo está activo",
+    notificationBody: "Tu ubicación se está compartiendo para recibir viajes.",
+  },
+});
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({

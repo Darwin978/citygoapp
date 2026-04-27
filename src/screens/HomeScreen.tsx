@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView } from 'react-native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -20,6 +20,7 @@ const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const [userId, setUserId] = useState<string | null>(null);
   const [region, setRegion] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(false);
   const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE'>('PICKUP');
@@ -46,8 +47,13 @@ export default function HomeScreen() {
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
 
   // Solicitudes de Viaje (Conductor)
-  const [pendingRequest, setPendingRequest] = useState<any>(null);
+  const [availableRequests, setAvailableRequests] = useState<any[]>([]);
   const [showRequestDialog, setShowRequestDialog] = useState<boolean>(false);
+  const [pendingRequest, setPendingRequest] = useState<any>(null);
+  const [activeRequestRide, setActiveRequestRide] = useState<any>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpValidate, setOtpValidate] = useState(false);
 
   // Animación del conductor (Para el cliente)
   const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -62,68 +68,182 @@ export default function HomeScreen() {
   const pickupSearchRef = useRef<any>(null);
   const destinationSearchRef = useRef<any>(null);
 
+  async function getUserId() {
+    const userId = await AsyncStorage.getItem('userId');
+    setUserId(userId);
+  }
+
+  useEffect(() => {
+    getUserId();
+  }, []);
+
   // 1. Inicializar Sockets
   useEffect(() => {
-    socket.current = io(SOCKET_URL);
+    // --- EL CAMBIO CLAVE: Pasar el userId ---
+    socket.current = io(SOCKET_URL, {
+      query: { userId: userId } // Asegúrate de tener el ID del usuario logueado aquí
+    });
 
-    // 2. Listener para Conductores: Nueva solicitud de viaje
+    socket.current.on('connect', () => {
+      console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
+
+      if (role === Roles.DRIVER) {
+        console.log("Ingresa a getAvailableRides");
+        socket.current.emit('getAvailableRides', (rides: any[]) => {
+          setAvailableRequests(rides);
+        });
+      }
+    });
+
     socket.current.on('newRideRequest', (req: any) => {
+      console.log("Nueva solicitud de viaje:", req);
+      setAvailableRequests(prevRequests => {
+        // Evitar duplicados por si el socket reintenta el envío
+        const exists = prevRequests.find(r => r.tripId === req.tripId);
+        if (exists) return prevRequests;
+        return [...prevRequests, req];
+      });
+
+      // Opcional: mostrar el diálogo solo para la más reciente
       setPendingRequest(req);
       setShowRequestDialog(true);
     });
 
-    // 3. Listener para Clientes: El conductor aceptó el viaje
     socket.current.on('trip_accepted', (data: any) => {
-      // Nos unimos a la sala del viaje para empezar a recibir coordenadas
       socket.current.emit('joinRide', data.rideId);
-
       setDriverInfo(data.driver);
-      setStatus('ON_RIDE');
-
-      Alert.alert("¡Conductor asignado!", `${data.driver.name} va en camino.`);
+      setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
+      Alert.alert("¡Conductor asignado!", `${data.driverName} va en camino.`);
     });
 
-    // 4. Listener Universal: Actualización de movimiento en el mapa
     socket.current.on('locationUpdated', (newCoords: any) => {
+      // Asegúrate de que el backend envíe 'latitude' y 'longitude'
+      const coords = {
+        latitude: newCoords.lat || newCoords.latitude,
+        longitude: newCoords.lng || newCoords.longitude,
+      };
+
       if (Platform.OS === 'android') {
-        // Animación suave para que el coche no "salte" en las calles de Cuenca
         animatedDriverCoords.timing({
-          latitude: newCoords.latitude,
-          longitude: newCoords.longitude,
+          ...coords,
           duration: 2000,
           useNativeDriver: false
         } as any).start();
       } else {
-        setDriverLocation(newCoords);
+        setDriverLocation(coords);
       }
     });
 
-    // 5. Limpieza al desmontar el componente
-    return () => socket.current.disconnect();
-  }, []);
+    socket.current.on('trip_taken', (data: { tripId: string }) => {
+      setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
+      if (pendingRequest?.tripId === data.tripId) {
+        setShowRequestDialog(false);
+        Alert.alert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+      }
+    });
+
+    socket.current.on('trip_completed_success', async () => {
+      // 1. Limpiar persistencia
+      await AsyncStorage.removeItem('activeRideId');
+
+      // 2. Resetear estados de la UI
+      setCurrentRideId(null);
+      setPendingRequest(null);
+      setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
+
+      Alert.alert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
+    });
+
+    socket.current.on('ride_finished', async (data: any) => {
+      // 1. Limpiar persistencia
+      await AsyncStorage.removeItem('activeRideId');
+
+      // 2. Resetear estados
+      setCurrentRideId(null);
+      setStatus('IDLE');
+
+      // 3. Mostrar resumen (Podrías navegar a una pantalla de Rating/Calificación)
+      Alert.alert(
+        "¡Llegamos!",
+        `${data.finalPrice}`
+      );
+    });
+
+    return () => {
+      if (socket.current) socket.current.disconnect();
+    };
+
+  }, [userId]);
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      console.log("Ingresa a restoreSession");
+      const savedRideId = await AsyncStorage.getItem('activeRideId');
+      console.log("savedRideId", savedRideId);
+      if (savedRideId) {
+        // 3. Pedimos al backend el estado REAL de ese viaje
+        socket.current.emit('getRideStatus', { rideId: savedRideId }, (response: any) => {
+          console.log("response getRideStatus", response);
+          if (response.status === 'ACCEPTED' || response.status === 'ON_RIDE' || response.status === 'IN_PROGRESS') {
+            // Restauramos los IDs
+            setCurrentRideId(savedRideId);
+
+            // Estructuramos el objeto para que el mapa pueda leer las coordenadas (destLat, destLng, etc.)
+            setActiveRequestRide({ ride: response.rideData });
+
+            // Simulamos el pendingRequest para que la UI muestre el nombre del pasajero
+            setPendingRequest({
+              tripId: savedRideId,
+              clientName: response.rideData?.client?.name || 'Pasajero',
+            });
+
+            // Determinamos si ya recogió al pasajero (OTP validado) o si va en camino
+            const isTripInProgress = response.status === 'IN_PROGRESS' || response.status === 'ON_RIDE' || response.rideData?.status === 'IN_PROGRESS';
+            setOtpValidate(isTripInProgress);
+
+            // Para el conductor, 'ON_RIDE' activa toda la UI del viaje en curso
+            setStatus('ON_RIDE');
+          } else {
+            // El viaje ya terminó o se canceló mientras la app estaba cerrada
+            AsyncStorage.removeItem('activeRideId');
+          }
+        });
+      }
+    };
+    restoreSession();
+  }, [userId])
 
   // 2. Obtener ubicación inicial y Rol
   useEffect(() => {
     (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      let loc = await Location.getCurrentPositionAsync({});
-      setRegion({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-      setMyLocation({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        heading: loc.coords.heading || 0,
-      });
-      getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
-      const savedRole = await AsyncStorage.getItem('role');
-      setRole(savedRole);
-      if (savedRole === Roles.DRIVER) {
-        setIsOnline(true);
+      try {
+        console.log("Ingresa a obtener ubicacion");
+        const savedRole = await AsyncStorage.getItem('role');
+        console.log("ROL", savedRole);
+        setRole(savedRole);
+        if (savedRole === Roles.DRIVER) {
+          setIsOnline(true);
+        }
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        console.log("status", status);
+        if (status !== 'granted') return;
+        let loc = await Location.getCurrentPositionAsync({});
+        console.log("posicion actual ", loc);
+        setRegion({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+        setMyLocation({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          heading: loc.coords.heading || 0,
+        });
+        getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
+
+      } catch (error) {
+        console.log("Error al obtener ubicacion", error);
       }
     })();
   }, []);
@@ -149,6 +269,23 @@ export default function HomeScreen() {
     }
     return () => locationWatcher?.remove();
   }, [isOnline, currentRideId]);
+
+  useEffect(() => {
+    const info = async () => {
+
+      console.log("activeRequestRide", activeRequestRide);
+      const coordinate = {
+        latitude: activeRequestRide?.ride?.originLat,
+        longitude: activeRequestRide?.ride?.originLng,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }
+      console.log("coordinate", coordinate);
+
+    }
+    info()
+    // refrescar cada 10 seg
+  }, [activeRequestRide])
 
   // --- FUNCIONES DE APOYO ---
 
@@ -277,6 +414,7 @@ export default function HomeScreen() {
     setPickupAddress('');
     setDestinationAddress('');
     centerOnUserLocation();
+    setOtpValidate(false);
   };
 
   const handleRequestRide = async () => {
@@ -294,6 +432,8 @@ export default function HomeScreen() {
       console.log("Data enviada:", data);
       const response = await requestRideApi(data);
       console.log("Respuesta de la API:", response);
+
+      socket.current.emit('joinRide', response.id);
       setCurrentRideId(response.id);
       setStatus('SEARCHING');
 
@@ -304,6 +444,116 @@ export default function HomeScreen() {
     }
   };
 
+  const handleAcceptTrip = async (tripId: string) => {
+    setLoading(true);
+    setOtpValidate(false);
+    try {
+      if (!pendingRequest) return;
+
+      socket.current.emit('accept_trip', { tripId: pendingRequest.tripId, userId: userId }, async (response: any) => {
+        console.log("triId", pendingRequest.tripId);
+        console.log("Respuesta de la API:", response);
+        if (response.status === 'success') {
+          await AsyncStorage.setItem('activeRideId', pendingRequest.tripId);
+          setCurrentRideId(pendingRequest.tripId);
+          setActiveRequestRide(response.data);
+          // 1. Limpiar solicitudes pendientes del mapa
+          setAvailableRequests([]);
+          setShowRequestDialog(false);
+
+          // 2. Cambiar estado local del conductor
+
+          setStatus('ON_RIDE');
+
+          // 3. Centrar mapa en el cliente para ir a recogerlo
+          const pickup = {
+            latitude: response.data.ride.originLat,
+            longitude: response.data.ride.originLng,
+          };
+
+          mapRef.current?.animateToRegion({
+            ...pickup,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          }, 1000);
+
+          Alert.alert("Viaje Asignado", "Dirígete al punto de recogida.");
+        } else {
+          Alert.alert("Error", response.message);
+          setShowRequestDialog(false);
+        }
+      });
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Hubo un problema al aceptar la solicitud.');
+    } finally {
+      setLoading(false);
+    }
+
+  };
+
+  const handleArrivedAtPickup = () => {
+    if (!currentRideId) return;
+
+    // Notificamos al backend que el conductor está en la puerta
+    socket.current.emit('driver_arrived', { rideId: currentRideId });
+
+    Alert.alert(
+      "CityGo",
+      "Has notificado al cliente que estás en el punto de recogida.",
+      [{ text: "OK", onPress: () => setShowOtpModal(true) }]
+    );
+  };
+
+  const handleStartRide = () => {
+    socket.current.emit('validate_start_code', {
+      rideId: currentRideId,
+      code: otpCode
+    }, (response: any) => {
+      if (response.success) {
+        setOtpCode('');
+        setShowOtpModal(false);
+        setOtpValidate(true);
+
+        // IMPORTANTE: Al pasar a ON_RIDE y haber validado el código, 
+        // el MapViewDirections ahora usará destinationCoords automáticamente
+        setStatus('ON_RIDE');
+
+        // Retrasamos la alerta ligeramente para que la animación de cierre del Modal termine y no la tape
+        setTimeout(() => {
+          Alert.alert("¡Viaje Iniciado!", "Dirígete al destino final.");
+        }, 400);
+      } else {
+        setOtpValidate(false);
+        setOtpCode('');
+        Alert.alert("Código Incorrecto", "El código no coincide. Verifica con el pasajero.");
+      }
+    });
+  };
+
+  const handleFinishRide = () => {
+    Alert.alert(
+      "Finalizar Viaje",
+      "¿Confirmas que has llegado al destino y deseas finalizar la carrera?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Finalizar", style: "destructive", onPress: () => {
+            if (currentRideId) {
+              socket.current.emit('finish_trip', { rideId: currentRideId });
+            }
+            Alert.alert("¡Viaje Finalizado!", "El viaje ha concluido con éxito.");
+            setStatus('PICKUP');
+            setCurrentRideId(null);
+            setActiveRequestRide(null);
+            setPendingRequest(null);
+            setOtpValidate(false);
+            AsyncStorage.removeItem('activeRideId');
+          }
+        }
+      ]
+    );
+  };
 
 
   if (!region || !role) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#1D4ED8" />;
@@ -351,20 +601,32 @@ export default function HomeScreen() {
         )}
 
         {/* Marcador de Solicitud Entrante para el Conductor */}
-        {role === Roles.DRIVER && isOnline && pendingRequest && (
+        {role === Roles.DRIVER && isOnline && availableRequests.map((request) => (
           <Marker
-            coordinate={{ latitude: pendingRequest.originLat, longitude: pendingRequest.originLng }}
-            onPress={() => setShowRequestDialog(true)}
+            key={request.tripId}
+            coordinate={{
+              latitude: request.pickupCoords.lat,
+              longitude: request.pickupCoords.lng
+            }}
+            onPress={() => {
+              setPendingRequest(request);
+              setShowRequestDialog(true);
+            }}
           >
-            <Ionicons name="person-circle" size={50} color="#10B981" />
+            <View style={styles.requestMarker}>
+              <Ionicons name="person-circle" size={40} color="#10B981" onPress={() => {
+                setPendingRequest(request);
+                setShowRequestDialog(true);
+              }} />
+            </View>
           </Marker>
-        )}
+        ))}
 
         {/* Puntos de Ruta */}
         {pickupCoords && <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#1D4ED8" /></Marker>}
         {destinationCoords && <Marker coordinate={destinationCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#EF4444" /></Marker>}
 
-        {status === 'ROUTE' && pickupCoords && destinationCoords && (
+        {/*{status === 'ROUTE' && pickupCoords && destinationCoords && (
           <MapViewDirections
             origin={pickupCoords}
             destination={destinationCoords}
@@ -376,11 +638,69 @@ export default function HomeScreen() {
               mapRef.current?.fitToCoordinates(res.coordinates, { edgePadding: { top: 100, right: 50, bottom: 300, left: 50 } });
             }}
           />
+        )}*/}
+
+        {((status === 'ROUTE' && pickupCoords && destinationCoords) ||
+          (status === 'ON_RIDE' && myLocation && pendingRequest)) && (
+            <MapViewDirections
+              // Si ya aceptamos (ON_RIDE), el origen es la ubicación real del conductor
+              origin={status === 'ON_RIDE' ? myLocation : pickupCoords}
+
+              // El destino depende de si el conductor está recogiendo o ya lleva al pasajero
+              destination={
+                // Si NO hemos validado el código, el destino es recoger al cliente
+                // Si SÍ hemos validado el código, el destino es el final del viaje
+                status === 'ON_RIDE' && !otpValidate
+                  ? { latitude: activeRequestRide.ride.originLat, longitude: activeRequestRide.ride.originLng }
+                  : { latitude: activeRequestRide.ride.destLat, longitude: activeRequestRide.ride.destLng }
+              }
+
+              apikey={GOOGLE_MAPS_APIKEY}
+              strokeWidth={5}
+              strokeColor={status === 'ON_RIDE' ? "#10B981" : "#1D4ED8"}
+              onReady={res => {
+                setRouteDetails(res);
+                // Ajuste de cámara para que el conductor vea su avance hacia el cliente
+                mapRef.current?.fitToCoordinates(res.coordinates, {
+                  edgePadding: { top: 100, right: 50, bottom: 300, left: 50 }
+                });
+              }}
+            />
+          )}
+
+        {status === 'ON_RIDE' && role === Roles.DRIVER && activeRequestRide && !otpValidate && (
+          <Marker
+            coordinate={{
+              latitude: activeRequestRide.ride.originLat,
+              longitude: activeRequestRide.ride.originLng
+            }}
+            title="Recoger aquí"
+          >
+            <View style={styles.pickupMarkerContainer}>
+              <Ionicons name="person-circle" size={40} color="#10B981" />
+              <View style={styles.markerLabel}>
+                <Text style={styles.markerLabelText}>CLIENTE</Text>
+              </View>
+            </View>
+          </Marker>
+        )}
+
+        {status === 'ON_RIDE' && role === Roles.DRIVER && activeRequestRide && otpValidate && (
+          <Marker
+            coordinate={{
+              latitude: activeRequestRide.ride.destLat,
+              longitude: activeRequestRide.ride.destLng
+            }}
+            title="Destino"
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <Ionicons name="location" size={50} color="#EF4444" />
+          </Marker>
         )}
       </MapView>
 
       {/* Driver Interface - Online Toggle */}
-      {role === Roles.DRIVER && (isOnline || (status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING')) && (
+      {role === Roles.DRIVER && (isOnline || (status !== 'ROUTE' && status !== 'SEARCHING')) && (
         <View style={[styles.driverInterface, { top: insets.top + (isOnline ? 10 : 150), zIndex: isOnline ? 2000 : 900 }]}>
           <View style={styles.statusCard}>
             <Text style={styles.statusText}>{isOnline ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}</Text>
@@ -540,7 +860,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={[styles.priceRow, { justifyContent: 'center', marginBottom: 20 }]}>
-              <Text style={styles.priceText}>${(pendingRequest.finalPrice || pendingRequest.price || 0).toFixed(2)}</Text>
+              <Text style={styles.priceText}>${(pendingRequest.price || 0).toFixed(2)}</Text>
               {pendingRequest.distance && <Text style={[styles.distanceText, { marginLeft: 10 }]}>{pendingRequest.distance}</Text>}
             </View>
 
@@ -551,17 +871,102 @@ export default function HomeScreen() {
               }}>
                 <Text style={styles.btnCancelSearchText}>Declinar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btnConfirm, { flex: 1, padding: 15 }]} onPress={() => {
-                Alert.alert("Aceptado", "Has aceptado el viaje. Dirígete al punto de recogida.");
-                setShowRequestDialog(false);
-                // Opcional: Cambiar estado a 'ON_RIDE'
-              }}>
-                <Text style={styles.btnText}>Aceptar</Text>
+              <TouchableOpacity disabled={loading} style={[styles.btnConfirm, { flex: 1, padding: 15 }]} onPress={() => handleAcceptTrip(pendingRequest.tripId)}>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.btnText}>Aceptar</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       )}
+      {status === 'ON_RIDE' && role === Roles.DRIVER && !otpValidate && (
+        <View style={styles.bottomContainer}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.statusLabel}>RECOGER PASAJERO</Text>
+            <View style={styles.clientInfoRow}>
+              <Ionicons name="person" size={24} color="#1D4ED8" />
+              <Text style={styles.clientNameText}>
+                Recoger a: {pendingRequest?.clientName || 'Pasajero'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15 }]}
+              onPress={handleArrivedAtPickup}
+            >
+              <Text style={styles.btnText}>¡HE LLEGADO!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {status === 'ON_RIDE' && role === Roles.DRIVER && otpValidate && (
+        <View style={styles.bottomContainer}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.statusLabel}>VIAJE EN CURSO</Text>
+            <View style={styles.clientInfoRow}>
+              <Ionicons name="location" size={24} color="#EF4444" />
+              <Text style={styles.clientNameText}>
+                Llevando a {pendingRequest?.clientName || 'Pasajero'} a su destino
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.btnConfirm, { backgroundColor: '#EF4444', marginTop: 15 }]}
+              onPress={handleFinishRide}
+            >
+              <Text style={styles.btnText}>FINALIZAR CARRERA</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <Modal visible={showOtpModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+          style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' }}
+        >
+          <View style={[styles.bottomContainer, { position: 'relative', bottom: insets.bottom }]}>
+            <View style={styles.confirmCard}>
+              <TouchableOpacity
+                style={{ position: 'absolute', top: 15, right: 15, zIndex: 10 }}
+                onPress={() => setShowOtpModal(false)}
+              >
+                <Ionicons name="close" size={28} color="#6B7280" />
+              </TouchableOpacity>
+
+              <Text style={[styles.searchingTitle, { color: '#1E3A8A', textAlign: 'center', marginBottom: 5 }]}>Código de Seguridad</Text>
+              <Text style={{ color: '#6B7280', textAlign: 'center', marginBottom: 15 }}>Solicita el código de 3 dígitos al pasajero</Text>
+
+              <TextInput
+                style={styles.otpInput}
+                placeholder="000"
+                keyboardType="numeric"
+                maxLength={3}
+                onChangeText={setOtpCode}
+                value={otpCode}
+              />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
+                <TouchableOpacity style={[styles.btnCancelSearch, { flex: 1, padding: 15 }]} onPress={() => setShowOtpModal(false)}>
+                  <Text style={styles.btnCancelSearchText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnConfirm, { flex: 1, padding: 15, opacity: otpCode.length === 3 ? 1 : 0.5 }]}
+                  onPress={handleStartRide}
+                  disabled={otpCode.length !== 3}
+                >
+                  <Text style={styles.btnText}>INICIAR</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -758,4 +1163,75 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#374151',
   },
+  requestMarker: {
+    alignItems: 'center',
+  },
+  priceBadge: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: -10,
+  },
+  priceBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  statusLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1D4ED8',
+    letterSpacing: 1,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+
+  clientInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    padding: 15,
+    borderRadius: 15,
+    marginBottom: 5,
+  },
+
+  clientNameText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E3A8A',
+    marginLeft: 10,
+  },
+  pickupMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  otpCard: {
+    width: '80%',
+    backgroundColor: 'white',
+    padding: 30,
+    borderRadius: 20,
+    alignItems: 'center'
+  },
+  otpTitle: { fontSize: 20, fontWeight: 'bold', color: '#1E3A8A' },
+  otpSubtitle: { color: '#6B7280', marginVertical: 10 },
+  otpInput: {
+    width: '100%',
+    height: 70,
+    borderWidth: 2,
+    borderColor: '#1D4ED8', // Azul de CityGo
+    borderRadius: 15,
+    textAlign: 'center',
+    fontSize: 32,
+    fontWeight: 'bold',
+    letterSpacing: 20, // Más espacio entre números
+    marginVertical: 20,
+    color: '#1E3A8A'
+  }
 });
