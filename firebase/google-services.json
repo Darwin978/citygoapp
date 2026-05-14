@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "724235416205",
+    "project_id": "citygo-49743",
+    "storage_bucket": "citygo-49743.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:724235416205:android:c3259b0a534547e0fe68c4",
+        "android_client_info": {
+          "package_name": "com.citygo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSxjF3YFFJ3OzusZIpn5UJk6GTHJEdRcA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

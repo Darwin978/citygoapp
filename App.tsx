@@ -20,6 +20,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import LoadingScreen from './src/screens/LoadingScreen';
 import TabNavigator from './src/navigation/TabNavigator';
 import * as Location from 'expo-location';
+import messaging from '@react-native-firebase/messaging';
+import { saveTokenInBackend } from './utils/services/userService';
 
 
 Location.startLocationUpdatesAsync("LOCATION_TASK", {
@@ -60,15 +62,22 @@ if (Platform.OS === 'android') {
 }
 
 async function registerForPushNotificationsAsync() {
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  if (finalStatus !== 'granted') {
+  const authStatus = await messaging().requestPermission();
+  const enabled =
+    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+    authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+  if (!enabled) {
     alert('¡Debes habilitar las notificaciones para recibir carreras!');
     return;
+  }
+
+  try {
+    const token = await messaging().getToken();
+    console.log('Firebase Cloud Messaging Token:', token);
+    await saveTokenInBackend(token);
+  } catch (error) {
+    console.log('Error getting FCM token:', error);
   }
 }
 
@@ -97,7 +106,7 @@ function WithoutLogin() {
 
 function RootNavigator() {
   const { isLoggedIn, isApproved } = useAuth();
-  const { termsAccepted, requestPermissions, locationGranted, audioGranted } = usePermissions();
+  const { termsAccepted, requestPermissions, locationGranted, requestOverlayPermission } = usePermissions();
 
   const [showSplash, setShowSplash] = useState(true);
 
@@ -121,11 +130,21 @@ function RootNavigator() {
   }, []);
 
 
+  useEffect(() => {
+    const unsubscribe = messaging().onMessage(async remoteMessage => {
+      console.log('Nueva carrera recibida (Foreground):', remoteMessage);
+    });
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     requestPermissions();
-    registerForPushNotificationsAsync();
-  }, []);
+    if (isLoggedIn) {
+      registerForPushNotificationsAsync();
+      requestOverlayPermission();
+    }
+  }, [isLoggedIn]);
 
 
   if (showSplash) {
@@ -228,6 +247,16 @@ function RootNavigator() {
     </Stack.Navigator>
   );
 }
+
+messaging().setBackgroundMessageHandler(async remoteMessage => {
+  console.log('Mensaje recibido en segundo plano:', remoteMessage);
+  if (Platform.OS === 'android') {
+    // Retrasar ligeramente para asegurar que se procesa el intent sobre otras aplicaciones
+    setTimeout(() => {
+      Linking.openURL('citygo://').catch(err => console.log('Error abriendo app', err));
+    }, 500);
+  }
+});
 
 export default function App() {
 

@@ -2,6 +2,7 @@
   "expo": {
     "name": "cityGoApp",
     "slug": "cityGoApp",
+    "scheme": "citygo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
@@ -13,10 +14,19 @@
       "image": "./assets/negro.jpg"
     },
     "ios": {
+      "googleServicesFile": "./firebase/GoogleService-Info.plist",
+      "bundleIdentifier": "com.citygo",
       "supportsTablet": true,
-      "bundleIdentifier": "com.citygo"
+      "config": {
+        "googleMapsApiKey": "AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Utilizamos tu ubicación para mostrar tu posición en el mapa y ayudarte a localizar y monitorear las carreras",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Utilizamos tu ubicación para permitir el monitoreo continuo de carreras."
+      }
     },
     "android": {
+      "googleServicesFile": "./firebase/google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
@@ -45,12 +55,10 @@
       }
     },
     "plugins": [
-      [
-        "expo-notifications",
-        {
-          "sounds": ["./assets/notificacion.mp3"]
-        }
-      ]
+      "./plugins/withModularHeadersIOS",
+      "./plugins/withNotificationIcon",
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging"
     ]
   }
 }

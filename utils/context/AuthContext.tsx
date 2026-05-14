@@ -25,7 +25,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     (async () => {
-        const token = await AsyncStorage.getItem('token');
+        const token = await AsyncStorage.getItem('authToken');
       setIsLoggedIn(!!token);
     })();
   }, []);

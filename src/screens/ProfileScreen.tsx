@@ -35,6 +35,7 @@ export default function ProfileScreen() {
     if (savedRole === Roles.DRIVER) {
       const vehicles = await getUserVehicles()
       if (vehicles) {
+        console.log("vehicles", vehicles)
         setVehicles(vehicles);
       } else {
         setVehicles([]);
@@ -172,7 +173,7 @@ export default function ProfileScreen() {
               {vehicles && vehicles.map((v) => (
                 <TouchableOpacity
                   key={v.id}
-                  style={[styles.vehicleCard, v.principal && styles.mainVehicleCard]}
+                  style={[styles.vehicleCard, v.activeVehicleId == v.id && styles.mainVehicleCard]}
                   onPress={() => handleSetMainVehicle(v.id)}
                 >
                   <View style={styles.vehicleInfo}>
@@ -181,9 +182,9 @@ export default function ProfileScreen() {
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
                     <Ionicons
-                      name={v.principal ? "checkmark-circle" : "ellipse-outline"}
+                      name={v.activeVehicleId == v.id ? "checkmark-circle" : "ellipse-outline"}
                       size={24}
-                      color={v.principal ? "#1D4ED8" : "#9CA3AF"}
+                      color={v.activeVehicleId == v.id ? "#1D4ED8" : "#9CA3AF"}
                     />
                     <TouchableOpacity onPress={() => {
                       Alert.alert(
