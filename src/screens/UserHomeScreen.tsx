@@ -16,17 +16,28 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
 import { cancelSolicitudApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import RatingModal from '../components/RatingModal';
+import { sendRatingApi } from '../../utils/services/userService';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
 const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
+
+type RideStatus =
+    | 'IDLE'
+    | 'REQUESTED'
+    | 'ACCEPTED'
+    | 'DRIVER_ARRIVED'
+    | 'IN_PROGRESS'
+    | 'TO_RATE';
+
 
 export default function UserHomeScreen() {
     const insets = useSafeAreaInsets();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
     const [isOnline, setIsOnline] = useState(false);
-    const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE'>('PICKUP');
+    const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'TO_DESTINO' | 'ON_RIDE'>('PICKUP');
     const [role, setRole] = useState<string | null>(null);
     const [routeDetails, setRouteDetails] = useState<any>(null);
     const [price, setPrice] = useState<number>(0);
@@ -59,6 +70,8 @@ export default function UserHomeScreen() {
     const [otpCode, setOtpCode] = useState('');
     const [otpValidate, setOtpValidate] = useState(false);
     const [isChatVisible, setIsChatVisible] = useState(false);
+    const [ratingModalVisible, setRatingModalVisible] = useState(false);
+    const [rideId, setRideId] = useState<string | null>(null);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -115,9 +128,16 @@ export default function UserHomeScreen() {
         });
 
         socket.current.on('trip_accepted', async (data: any) => {
+            console.log("¡Viaje aceptado!", data);
             socket.current.emit('joinRide', data.rideId);
-            setDriverInfo(data.driver);
-            setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
+            setRideId(data.rideId);
+
+            setDriverInfo({
+                name: data.driverName,
+                vehicle: data.driverVehicle,
+            });
+            setDriverLocation(data.currentLocation);
+            setStatus('ON_RIDE');
             await AsyncStorage.setItem('activeRideId', data.rideId);
             Alert.alert("¡Conductor asignado!", `${data.driverName} va en camino.`);
         });
@@ -127,19 +147,30 @@ export default function UserHomeScreen() {
             Alert.alert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
         });
 
-        socket.current.on('locationUpdated', (newCoords: any) => {
-            // Asegúrate de que el backend envíe 'latitude' y 'longitude'
+        socket.current.on('ride_started', (data: any) => {
+            setStatus('TO_DESTINO');
+            Alert.alert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
+        })
+
+        socket.current.on('driver_location_update', (newCoords: any) => {
             const coords = {
-                latitude: newCoords.lat || newCoords.latitude,
-                longitude: newCoords.lng || newCoords.longitude,
-                heading: newCoords.heading || 0,
+                latitude: newCoords.coords.lat || newCoords.coords.latitude,
+                longitude: newCoords.coords.lng || newCoords.coords.longitude,
+                heading: newCoords.coords.heading || 0,
             };
+
+            if (!coords.latitude || !coords.longitude) return;
+
+            // Actualizamos la posición animada (Para que el carro no de saltos)
             animatedDriverCoords.timing({
                 latitude: coords.latitude,
                 longitude: coords.longitude,
-                duration: 2000,
+                duration: 1000, // Duración del paso
                 useNativeDriver: false
             } as any).start();
+
+            // Guardamos el heading para la rotación del icono
+            setDriverLocation(coords);
         });
 
         socket.current.on('trip_taken', (data: { tripId: string }) => {
@@ -157,25 +188,36 @@ export default function UserHomeScreen() {
             // 2. Resetear estados de la UI
             setCurrentRideId(null);
             setPendingRequest(null);
+            setActiveRequestRide(null);
+            setDriverInfo(null);
+            setPickupCoords(null);
+            setDestinationCoords(null);
+            setRouteDetails(null);
+            setPickupAddress('');
+            setDestinationAddress('');
+            setOtpValidate(false);
+            pickupSearchRef.current?.setAddressText('');
+            destinationSearchRef.current?.setAddressText('');
+
             setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
+            centerOnUserLocation();
 
             Alert.alert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
         });
 
         socket.current.on('ride_finished', async (data: any) => {
-            // 1. Limpiar persistencia
+            // 1. Limpiar persistencia para que no intente restaurarlo
             await AsyncStorage.removeItem('activeRideId');
 
-            // 2. Resetear estados
-            setCurrentRideId(null);
-            setStatus('IDLE');
-
-            // 3. Mostrar resumen (Podrías navegar a una pantalla de Rating/Calificación)
+            // Mostrar resumen y pedir calificación
+            // IMPORTANTE: No reseteamos los estados aún, para poder enviar el rideId al calificar
             Alert.alert(
-                "¡Llegamos!",
-                `${data.finalPrice}`
+                "¡Llegamos! Esperamos que hayas tenido un buen viaje, no olvides calificar al conductor",
             );
+            setRatingModalVisible(true);
         });
+
+
 
         return () => {
             if (socket.current) socket.current.disconnect();
@@ -203,15 +245,15 @@ export default function UserHomeScreen() {
 
                         // Estructuramos el objeto para que el mapa pueda leer las coordenadas (destLat, destLng, etc.)
                         setActiveRequestRide({ ride: response.rideData });
-                        
+
                         // Set map coords for User to show route correctly
-                        setPickupCoords({ latitude: response.rideData.originLat, longitude: response.rideData.originLng });
-                        setDestinationCoords({ latitude: response.rideData.destLat, longitude: response.rideData.destLng });
+                        setPickupCoords({ latitude: response.rideData.pickupCoords.lat, longitude: response.rideData.pickupCoords.lng });
+                        setDestinationCoords({ latitude: response.rideData.destCoords.lat, longitude: response.rideData.destCoords.lng });
 
                         // Simulamos el pendingRequest para que la UI muestre el nombre del pasajero
                         setPendingRequest({
                             tripId: savedRideId,
-                            clientName: response.rideData?.client?.name || 'Pasajero',
+                            clientName: response.rideData?.clientName || 'Pasajero',
                         });
 
                         if (response.status === 'REQUESTED') {
@@ -271,28 +313,6 @@ export default function UserHomeScreen() {
             }
         })();
     }, []);
-
-    // 3. Lógica del Conductor: Enviar ubicación
-    useEffect(() => {
-        let locationWatcher: any;
-        if (role === Roles.DRIVER && isOnline) {
-            (async () => {
-                locationWatcher = await Location.watchPositionAsync(
-                    { accuracy: Location.Accuracy.High, distanceInterval: 5 },
-                    (location) => {
-                        const coords = {
-                            latitude: location.coords.latitude,
-                            longitude: location.coords.longitude,
-                            heading: location.coords.heading,
-                        };
-                        setMyLocation(coords);
-                        socket.current.emit('updateLocation', { rideId: currentRideId, coords });
-                    }
-                );
-            })();
-        }
-        return () => locationWatcher?.remove();
-    }, [isOnline, currentRideId]);
 
     useEffect(() => {
         const info = async () => {
@@ -391,13 +411,15 @@ export default function UserHomeScreen() {
 
             // Escuchamos el evento específico de este viaje
             // El backend debe emitir a: `ride_location_${activeRideId}`
-            const eventName = `driver_location_update`;
+            const eventName = `locationUpdated`;
 
             socket.current.on(eventName, (data: any) => {
+                console.log("data", data);
+
                 if (data.rideId === activeRequestRide?.tripId) {
                     setDriverLocation({
-                        latitude: data.coords.lat,
-                        longitude: data.coords.lng,
+                        latitude: data.coords.lat || data.coords.latitude,
+                        longitude: data.coords.lng || data.coords.longitude,
                         heading: data.coords.heading || 0,
                     });
                 }
@@ -550,55 +572,38 @@ export default function UserHomeScreen() {
 
     };
 
+    const handleSendRating = async (score: number, comment: string) => {
+        try {
+            const response = await sendRatingApi({
+                rideId: currentRideId,
+                driverId: activeRequestRide?.driverId || driverInfo?.id,
+                score,
+                comment,
+            });
+            console.log("Respuesta de la API:", response);
+            Alert.alert("Calificación enviada", "Gracias por tu comentario.");
+            setRatingModalVisible(false);
 
-    const handleStartRide = () => {
-        socket.current.emit('validate_start_code', {
-            rideId: currentRideId,
-            code: otpCode
-        }, (response: any) => {
-            if (response.success) {
-                setOtpCode('');
-                setShowOtpModal(false);
-                setOtpValidate(true);
+            // Ahora sí limpiamos el estado
+            setCurrentRideId(null);
+            setPendingRequest(null);
+            setActiveRequestRide(null);
+            setDriverInfo(null);
+            setPickupCoords(null);
+            setDestinationCoords(null);
+            setRouteDetails(null);
+            setPickupAddress('');
+            setDestinationAddress('');
+            setOtpValidate(false);
+            pickupSearchRef.current?.setAddressText('');
+            destinationSearchRef.current?.setAddressText('');
 
-                // IMPORTANTE: Al pasar a ON_RIDE y haber validado el código, 
-                // el MapViewDirections ahora usará destinationCoords automáticamente
-                setStatus('ON_RIDE');
-
-                // Retrasamos la alerta ligeramente para que la animación de cierre del Modal termine y no la tape
-                setTimeout(() => {
-                    Alert.alert("¡Viaje Iniciado!", "Dirígete al destino final.");
-                }, 400);
-            } else {
-                setOtpValidate(false);
-                setOtpCode('');
-                Alert.alert("Código Incorrecto", "El código no coincide. Verifica con el pasajero.");
-            }
-        });
-    };
-
-    const handleFinishRide = () => {
-        Alert.alert(
-            "Finalizar Viaje",
-            "¿Confirmas que has llegado al destino y deseas finalizar la carrera?",
-            [
-                { text: "Cancelar", style: "cancel" },
-                {
-                    text: "Finalizar", style: "destructive", onPress: () => {
-                        if (currentRideId) {
-                            socket.current.emit('finish_trip', { rideId: currentRideId });
-                        }
-                        Alert.alert("¡Viaje Finalizado!", "El viaje ha concluido con éxito.");
-                        setStatus('PICKUP');
-                        setCurrentRideId(null);
-                        setActiveRequestRide(null);
-                        setPendingRequest(null);
-                        setOtpValidate(false);
-                        AsyncStorage.removeItem('activeRideId');
-                    }
-                }
-            ]
-        );
+            setStatus('IDLE');
+            centerOnUserLocation();
+        } catch (e) {
+            console.error(e);
+            Alert.alert("Error", "Hubo un problema al enviar la calificación.");
+        }
     };
 
 
@@ -623,13 +628,19 @@ export default function UserHomeScreen() {
                 }}
             >
                 {/* Marcador del Conductor Animado (Para el Cliente) */}
-                {role === Roles.USER && status === 'ON_RIDE' && driverLocation && (
+                {(status === 'ON_RIDE' || status === 'TO_DESTINO') && role === Roles.USER && driverLocation && driverLocation.latitude && driverLocation.longitude && (
                     <Marker.Animated
+                        key="driver-marker"
                         coordinate={animatedDriverCoords as any}
                         anchor={{ x: 0.5, y: 0.5 }}
+                        flat={true} // Importante para que la rotación se vea natural sobre el mapa
                     >
                         <View style={{ transform: [{ rotate: `${driverLocation.heading || 0}deg` }] }}>
-                            <Image source={CarIcon} style={{ width: 40, height: 40 }} resizeMode="contain" />
+                            <Image
+                                source={require('../../assets/car_icon.png')}
+                                style={{ width: 40, height: 40 }}
+                                resizeMode="contain"
+                            />
                         </View>
                     </Marker.Animated>
                 )}
@@ -639,17 +650,15 @@ export default function UserHomeScreen() {
                 {pickupCoords && <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#1D4ED8" /></Marker>}
                 {destinationCoords && <Marker coordinate={destinationCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#EF4444" /></Marker>}
 
-                {/* Ruta para Usuario en MODE_RIDE */}
-                {(status === 'DESTINATION' || status === 'SEARCHING' || status === 'ON_RIDE') && pickupCoords && destinationCoords && role === Roles.USER && (
+                {role === Roles.USER && (status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocation && (
                     <MapViewDirections
-                        origin={pickupCoords}
-                        destination={destinationCoords}
+                        origin={driverLocation} // Sale de donde está el carro actualmente
+                        destination={status === 'ON_RIDE' ? pickupCoords : destinationCoords}
                         apikey={GOOGLE_MAPS_APIKEY}
                         strokeWidth={5}
                         strokeColor="#1D4ED8"
                         onReady={res => {
-                            setRouteDetails(res);
-                            mapRef.current?.fitToCoordinates(res.coordinates, { edgePadding: { top: 100, right: 50, bottom: 300, left: 50 } });
+                            // No usamos fitToCoordinates aquí para no "marear" al usuario moviendo la cámara solo
                         }}
                     />
                 )}
@@ -658,14 +667,14 @@ export default function UserHomeScreen() {
                 {/* Renderizado de Rutas Inteligente */}
                 {(
                     (status === 'ROUTE' && pickupCoords && destinationCoords) ||
-                    (status === 'ON_RIDE' && activeRequestRide)
+                    ((status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide)
                 ) && (
                         <MapViewDirections
                             // ORIGEN:
                             // 1. Si soy el conductor asignado al viaje: Salgo de MI ubicación actual.
                             // 2. Si soy el cliente (aunque sea conductor de profesión): Salgo de mi punto de recogida.
                             origin={
-                                status === 'ON_RIDE' && activeRequestRide?.driverId === userId
+                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId
                                     ? myLocation
                                     : pickupCoords
                             }
@@ -673,7 +682,7 @@ export default function UserHomeScreen() {
                             // DESTINO:
                             destination={
                                 // Si soy el conductor asignado:
-                                status === 'ON_RIDE' && activeRequestRide?.driverId === userId
+                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId
                                     ? (!otpValidate
                                         ? { latitude: activeRequestRide.ride.originLat, longitude: activeRequestRide.ride.originLng }
                                         : { latitude: activeRequestRide.ride.destLat, longitude: activeRequestRide.ride.destLng })
@@ -725,8 +734,8 @@ export default function UserHomeScreen() {
                     </Marker>
                 )}
 
-                {status === 'ON_RIDE' && driverLocationUser && (
-                    <Marker.Animated
+                {(status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocationUser && (
+                    <Marker
                         coordinate={{
                             latitude: driverLocationUser.latitude,
                             longitude: driverLocationUser.longitude,
@@ -738,7 +747,7 @@ export default function UserHomeScreen() {
                             source={require('../../assets/car_icon.png')}
                             style={{ width: 40, height: 40 }}
                         />
-                    </Marker.Animated>
+                    </Marker>
                 )}
 
             </MapView>
@@ -759,7 +768,7 @@ export default function UserHomeScreen() {
             )}
 
             {/* Buscadores Flotantes */}
-            {!isOnline && status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'SEARCHING' && (
+            {!isOnline && status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'TO_DESTINO' && status !== 'SEARCHING' && (
                 <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
                     <GooglePlacesAutocomplete
                         ref={pickupSearchRef}
@@ -869,6 +878,20 @@ export default function UserHomeScreen() {
                             <Text style={styles.btnCancelText}>Cambiar Ruta / Cancelar</Text>
                         </TouchableOpacity>
                     </View>
+                ) : status == "TO_DESTINO" ? (
+                    <View style={styles.bottomContainer}>
+                        <View style={styles.confirmCard}>
+                            <Text style={[styles.statusLabel, { color: '#10B981' }]}>YA ESTAMOS EN CAMINO</Text>
+
+                            {/*<TouchableOpacity
+                                style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
+                                onPress={() => setIsChatVisible(true)}
+                            >
+                                <Ionicons name="chatbubbles" size={20} color="white" />
+                                <Text style={styles.btnText}>Chat con Conductor</Text>
+                            </TouchableOpacity>*/}
+                        </View>
+                    </View>
                 ) : (
                     !isOnline && (
                         <TouchableOpacity style={styles.mainActionBtn} onPress={handleAction} disabled={loading}>
@@ -879,74 +902,6 @@ export default function UserHomeScreen() {
                     )
                 )}
             </View>
-
-            {/* Diálogo de Nueva Solicitud (Conductor) */}
-            {role === Roles.DRIVER && isOnline && pendingRequest && showRequestDialog && (
-                <View style={[styles.bottomContainer, { bottom: insets.bottom + 0, zIndex: 3000 }]}>
-                    <View style={styles.confirmCard}>
-                        <TouchableOpacity
-                            style={{ position: 'absolute', top: 15, right: 15, zIndex: 10 }}
-                            onPress={() => setShowRequestDialog(false)}
-                        >
-                            <Ionicons name="close" size={28} color="#6B7280" />
-                        </TouchableOpacity>
-
-                        <Text style={[styles.searchingTitle, { color: '#10B981', textAlign: 'center', marginBottom: 5 }]}>¡Nueva Solicitud de Viaje!</Text>
-
-                        <View style={{ marginBottom: 10, marginTop: 10 }}>
-                            <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Recogida:</Text>
-                            <Text style={{ color: '#6B7280' }}>{pendingRequest.originAddress || 'Cargando...'}</Text>
-                        </View>
-
-                        <View style={{ marginBottom: 15 }}>
-                            <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Destino:</Text>
-                            <Text style={{ color: '#6B7280' }}>{pendingRequest.destinationAddress || 'Cargando...'}</Text>
-                        </View>
-
-                        <View style={[styles.priceRow, { justifyContent: 'center', marginBottom: 20 }]}>
-                            <Text style={styles.priceText}>${(pendingRequest.price || 0).toFixed(2)}</Text>
-                            {pendingRequest.distance && <Text style={[styles.distanceText, { marginLeft: 10 }]}>{pendingRequest.distance}</Text>}
-                        </View>
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-                            <TouchableOpacity style={[styles.btnCancelSearch, { flex: 1, padding: 15 }]} onPress={() => {
-                                setPendingRequest(null);
-                                setShowRequestDialog(false);
-                            }}>
-                                <Text style={styles.btnCancelSearchText}>Declinar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity disabled={loading} style={[styles.btnConfirm, { flex: 1, padding: 15 }]} onPress={() => handleAcceptTrip(pendingRequest.tripId)}>
-                                {loading ? (
-                                    <ActivityIndicator size="small" color="#fff" />
-                                ) : (
-                                    <Text style={styles.btnText}>Aceptar</Text>
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            )}
-
-            {status === 'ON_RIDE' && role === Roles.DRIVER && otpValidate && (
-                <View style={styles.bottomContainer}>
-                    <View style={styles.confirmCard}>
-                        <Text style={styles.statusLabel}>VIAJE EN CURSO</Text>
-                        <View style={styles.clientInfoRow}>
-                            <Ionicons name="location" size={24} color="#EF4444" />
-                            <Text style={styles.clientNameText}>
-                                Llevando a {pendingRequest?.clientName || 'Pasajero'} a su destino
-                            </Text>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.btnConfirm, { backgroundColor: '#EF4444', marginTop: 15 }]}
-                            onPress={handleFinishRide}
-                        >
-                            <Text style={styles.btnText}>FINALIZAR CARRERA</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            )}
 
             {status === 'ON_RIDE' && role === Roles.USER && (
                 <View style={styles.bottomContainer}>
@@ -964,68 +919,31 @@ export default function UserHomeScreen() {
                         <Text style={{ textAlign: 'center', fontSize: 32, fontWeight: 'bold', color: '#1E3A8A', marginTop: 5, letterSpacing: 10 }}>
                             {optValue || otpCode}
                         </Text>
-                        
-                        <TouchableOpacity 
-                            style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]} 
+
+                        {/*<TouchableOpacity
+                            style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
                             onPress={() => setIsChatVisible(true)}
                         >
                             <Ionicons name="chatbubbles" size={20} color="white" />
                             <Text style={styles.btnText}>Chat con Conductor</Text>
-                        </TouchableOpacity>
+                        </TouchableOpacity>*/}
                     </View>
                 </View>
             )}
 
-            <Modal visible={showOtpModal} transparent animationType="slide">
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' }}
-                >
-                    <View style={[styles.bottomContainer, { position: 'relative', bottom: insets.bottom }]}>
-                        <View style={styles.confirmCard}>
-                            <TouchableOpacity
-                                style={{ position: 'absolute', top: 15, right: 15, zIndex: 10 }}
-                                onPress={() => setShowOtpModal(false)}
-                            >
-                                <Ionicons name="close" size={28} color="#6B7280" />
-                            </TouchableOpacity>
 
-                            <Text style={[styles.searchingTitle, { color: '#1E3A8A', textAlign: 'center', marginBottom: 5 }]}>Código de Seguridad</Text>
-                            <Text style={{ color: '#6B7280', textAlign: 'center', marginBottom: 15 }}>Solicita el código de 3 dígitos al pasajero</Text>
+            <ChatModal
+                visible={isChatVisible}
+                onClose={() => setIsChatVisible(false)}
+                socket={socket.current}
+                rideId={currentRideId}
+                userId={userId}
+            />
 
-                            <TextInput
-                                style={styles.otpInput}
-                                placeholder="000"
-                                keyboardType="numeric"
-                                maxLength={3}
-                                onChangeText={setOtpCode}
-                                value={otpCode}
-                            />
-
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-                                <TouchableOpacity style={[styles.btnCancelSearch, { flex: 1, padding: 15 }]} onPress={() => setShowOtpModal(false)}>
-                                    <Text style={styles.btnCancelSearchText}>Cancelar</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.btnConfirm, { flex: 1, padding: 15, opacity: otpCode.length === 3 ? 1 : 0.5 }]}
-                                    onPress={handleStartRide}
-                                    disabled={otpCode.length !== 3}
-                                >
-                                    <Text style={styles.btnText}>INICIAR</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
-
-            <ChatModal 
-                visible={isChatVisible} 
-                onClose={() => setIsChatVisible(false)} 
-                socket={socket.current} 
-                rideId={currentRideId} 
-                userId={userId} 
+            <RatingModal
+                visible={ratingModalVisible}
+                onSend={handleSendRating}
+                driverName={driverInfo?.name}
             />
         </View>
     );

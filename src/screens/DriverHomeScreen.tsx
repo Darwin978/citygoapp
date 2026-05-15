@@ -1025,14 +1025,14 @@ export default function DriverHomeScreen() {
                                 <Text style={styles.btnText}>LLEGUÉ</Text>
                             </TouchableOpacity>
                         </View>
-                        
-                        <TouchableOpacity
+
+                        {/*<TouchableOpacity
                             style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                             onPress={() => setIsChatVisible(true)}
                         >
                             <Ionicons name="chatbubbles" size={20} color="white" />
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
-                        </TouchableOpacity>
+                        </TouchableOpacity>*/}
                     </View>
                 </View>
             )}
@@ -1066,13 +1066,13 @@ export default function DriverHomeScreen() {
                             </TouchableOpacity>
                         </View>
 
-                        <TouchableOpacity
+                        {/*<TouchableOpacity
                             style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                             onPress={() => setIsChatVisible(true)}
                         >
                             <Ionicons name="chatbubbles" size={20} color="white" />
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
-                        </TouchableOpacity>
+                        </TouchableOpacity>*/}
                     </View>
                 </View>
             )}
@@ -1121,12 +1121,12 @@ export default function DriverHomeScreen() {
                 </KeyboardAvoidingView>
             </Modal>
 
-            <ChatModal 
-                visible={isChatVisible} 
-                onClose={() => setIsChatVisible(false)} 
-                socket={socket.current} 
-                rideId={currentRideId} 
-                userId={userId} 
+            <ChatModal
+                visible={isChatVisible}
+                onClose={() => setIsChatVisible(false)}
+                socket={socket.current}
+                rideId={currentRideId}
+                userId={userId}
             />
         </View>
     );

@@ -9,7 +9,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
 const Stack = createNativeStackNavigator();
 import * as Notifications from 'expo-notifications';
-import { Linking, Platform, TouchableOpacity, View, Text } from 'react-native';
+import { Linking, Platform, TouchableOpacity, View, Text, AppState } from 'react-native';
 import { AndroidNotificationPriority } from 'expo-notifications';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from './utils/context/AuthContext';
@@ -140,12 +140,31 @@ function RootNavigator() {
 
   useEffect(() => {
     requestPermissions();
+
     if (isLoggedIn) {
       registerForPushNotificationsAsync();
       requestOverlayPermission();
+
+      // Actualizar token cada vez que la app vuelve al primer plano
+      const appStateSubscription = AppState.addEventListener('change', nextAppState => {
+        if (nextAppState === 'active') {
+          console.log('App ha vuelto al primer plano. Verificando token FCM...');
+          registerForPushNotificationsAsync();
+        }
+      });
+
+      // Escuchar también cuando Firebase decida refrescar el token internamente
+      const unsubscribeTokenRefresh = messaging().onTokenRefresh(async (token) => {
+        console.log('El token FCM se ha refrescado automáticamente:', token);
+        await saveTokenInBackend(token);
+      });
+
+      return () => {
+        appStateSubscription.remove();
+        unsubscribeTokenRefresh();
+      };
     }
   }, [isLoggedIn]);
-
 
   if (showSplash) {
     return <LoadingScreen />;

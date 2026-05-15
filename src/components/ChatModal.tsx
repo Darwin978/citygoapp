@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ChatModalProps {
   visible: boolean;
@@ -14,6 +15,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId }: 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!visible || !socket || !rideId || !userId) return;
@@ -60,10 +62,11 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId }: 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
         style={styles.container}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top || 40 : insets.top + 10 }]}>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
             <Ionicons name="close" size={28} color="#1D4ED8" />
           </TouchableOpacity>
@@ -93,7 +96,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId }: 
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
 
-        <View style={styles.inputArea}>
+        <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 15) }]}>
           <TextInput
             style={styles.input}
             placeholder="Escribe un mensaje..."
@@ -119,7 +122,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
-    paddingTop: Platform.OS === 'ios' ? 50 : 15,
   },
   closeBtn: { marginRight: 15 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1E3A8A' },

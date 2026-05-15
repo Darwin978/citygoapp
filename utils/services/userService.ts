@@ -155,3 +155,32 @@ export async function saveTokenInBackend(token: string) {
         throw error;
     }
 }
+
+export async function sendRatingApi(ratingData: any) {
+    try {
+        console.log("Ingresa envio de rating", ratingData);
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(`${endPoint.sendRating}/${ratingData.rideId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                driverId: ratingData.driverId,
+                score: ratingData.score,
+                comment: ratingData.comment
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to send rating');
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error sending rating:', error);
+        throw error;
+    }
+}
