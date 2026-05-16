@@ -35,6 +35,10 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "FOREGROUND_SERVICE",
+        "POST_NOTIFICATIONS",
+        "USE_FULL_SCREEN_INTENT",
+        "VIBRATE",
+        "WAKE_LOCK",
         "SYSTEM_ALERT_WINDOW"
       ],
       "edgeToEdgeEnabled": true,
@@ -55,6 +59,14 @@
       }
     },
     "plugins": [
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/notificacion.mp3"
+          ]
+        }
+      ],
       "./plugins/withModularHeadersIOS",
       "./plugins/withNotificationIcon",
       "@react-native-firebase/app",

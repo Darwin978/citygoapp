@@ -12,11 +12,12 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { cancelSolicitudApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import MapZoomControls from '../components/MapZoomControls';
 import * as Notifications from 'expo-notifications';
 import { updateStatusDriverApi } from '../../utils/services/userService';
 import ChatModal from '../components/ChatModal';
+import { isActiveBackendRideStatus, isTripInProgress, mapBackendStatusToDriverScreen } from '../../utils/services/rideFlow';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
@@ -27,7 +28,7 @@ export default function DriverHomeScreen() {
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
     const [isOnline, setIsOnline] = useState(false);
-    const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE'>('PICKUP');
+    const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE' | 'REQUESTED' | 'ACCEPTED' | 'TO_PICKUP' | 'IN_PROGRESS' | 'TO_RATING' | 'COMPLETED' | 'CANCELLED'>('PICKUP');
     const [role, setRole] = useState<string | null>(null);
     const [routeDetails, setRouteDetails] = useState<any>(null);
     const [price, setPrice] = useState<number>(0);
@@ -59,6 +60,7 @@ export default function DriverHomeScreen() {
     const [otpCode, setOtpCode] = useState('');
     const [otpValidate, setOtpValidate] = useState(false);
     const [isChatVisible, setIsChatVisible] = useState(false);
+    const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -87,10 +89,19 @@ export default function DriverHomeScreen() {
 
     // 1. Inicializar Sockets
     useEffect(() => {
-        // --- EL CAMBIO CLAVE: Pasar el userId ---
-        socket.current = io(SOCKET_URL, {
-            query: { userId: userId } // Asegúrate de tener el ID del usuario logueado aquí
-        });
+        if (!userId) return;
+
+        let isMounted = true;
+
+        const connectSocket = async () => {
+            const token = await AsyncStorage.getItem('authToken');
+            if (!isMounted) return;
+
+            // --- EL CAMBIO CLAVE: Pasar token y userId ---
+            socket.current = io(SOCKET_URL, {
+                query: { userId: userId },
+                auth: { token },
+            });
 
         socket.current.on('connect', () => {
             console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
@@ -199,45 +210,83 @@ export default function DriverHomeScreen() {
             );
         });
 
+        };
+
+        connectSocket();
+
         return () => {
+            isMounted = false;
             if (socket.current) socket.current.disconnect();
         };
 
-    }, [userId]);
+    }, [userId, role]);
 
     useEffect(() => {
         const restoreSession = async () => {
             console.log("Ingresa a restoreSession");
-            const savedRideId = await AsyncStorage.getItem('activeRideId');
-            console.log("savedRideId", savedRideId);
-            if (savedRideId) {
-                // 3. Pedimos al backend el estado REAL de ese viaje
-                socket.current.emit('getRideStatus', { rideId: savedRideId }, (response: any) => {
-                    console.log("response getRideStatus", response);
-                    if (response.status === 'ACCEPTED' || response.status === 'ON_RIDE' || response.status === 'IN_PROGRESS') {
-                        // Restauramos los IDs
-                        setCurrentRideId(savedRideId);
+            try {
+                const response = await getActiveRideApi();
+                console.log("response getActiveRideApi", response);
+                if (!response || !response.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
+                    await AsyncStorage.removeItem('activeRideId');
+                    return;
+                }
 
-                        // Estructuramos el objeto para que el mapa pueda leer las coordenadas (destLat, destLng, etc.)
-                        setActiveRequestRide({ ride: { originLat: response.rideData.pickupCoords.lat, originLng: response.rideData.pickupCoords.lng, destLat: response.rideData.destCoords.lat, destLng: response.rideData.destCoords.lng } });
-
-                        // Simulamos el pendingRequest para que la UI muestre el nombre del pasajero
-                        setPendingRequest({
-                            tripId: savedRideId,
-                            clientName: response.rideData?.client?.name || 'Pasajero',
-                        });
-
-                        // Determinamos si ya recogió al pasajero (OTP validado) o si va en camino
-                        const isTripInProgress = response.status === 'IN_PROGRESS' || response.status === 'ON_RIDE' || response.rideData?.status === 'IN_PROGRESS';
-                        setOtpValidate(isTripInProgress);
-
-                        // Para el conductor, 'ON_RIDE' activa toda la UI del viaje en curso
-                        setStatus('ON_RIDE');
-                    } else {
-                        // El viaje ya terminó o se canceló mientras la app estaba cerrada
-                        AsyncStorage.removeItem('activeRideId');
+                const activeRideId = response.rideData.tripId;
+                await AsyncStorage.setItem('activeRideId', activeRideId);
+                setCurrentRideId(activeRideId);
+                setInitialChatMessages(response.rideData.messages || []);
+                setActiveRequestRide({
+                    ...response,
+                    ride: {
+                        originLat: response.rideData.pickupCoords.lat,
+                        originLng: response.rideData.pickupCoords.lng,
+                        destLat: response.rideData.destCoords.lat,
+                        destLng: response.rideData.destCoords.lng,
+                        originAddress: response.rideData.originAddress,
+                        destinationAddress: response.rideData.destAddress,
                     }
                 });
+
+                setPendingRequest({
+                    tripId: activeRideId,
+                    clientName: response.rideData?.clientName || 'Pasajero',
+                });
+                socket.current?.emit('joinRide', activeRideId);
+                setOtpValidate(isTripInProgress(response.status));
+                setStatus(mapBackendStatusToDriverScreen(response.status) as any);
+            } catch (error) {
+                console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
+                const savedRideId = await AsyncStorage.getItem('activeRideId');
+                if (savedRideId && socket.current) {
+                    socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
+                        if (!response || !response.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
+                            AsyncStorage.removeItem('activeRideId');
+                            return;
+                        }
+
+                        await AsyncStorage.setItem('activeRideId', savedRideId);
+                        setCurrentRideId(savedRideId);
+                        setInitialChatMessages(response.rideData.messages || []);
+                        setActiveRequestRide({
+                            ...response,
+                            ride: {
+                                originLat: response.rideData.pickupCoords.lat,
+                                originLng: response.rideData.pickupCoords.lng,
+                                destLat: response.rideData.destCoords.lat,
+                                destLng: response.rideData.destCoords.lng,
+                            }
+                        });
+
+                        setPendingRequest({
+                            tripId: savedRideId,
+                            clientName: response.rideData?.clientName || 'Pasajero',
+                        });
+                        socket.current.emit('joinRide', savedRideId);
+                        setOtpValidate(isTripInProgress(response.status));
+                        setStatus(mapBackendStatusToDriverScreen(response.status) as any);
+                    });
+                }
             }
         };
         restoreSession();
@@ -475,6 +524,7 @@ export default function DriverHomeScreen() {
                 destLat: destinationCoords.latitude,
                 destLng: destinationCoords.longitude,
                 finalPrice: price,
+                paymentMethod,
             }
             console.log("Data enviada:", data);
             const response = await requestRideApi(data);
@@ -600,6 +650,7 @@ export default function DriverHomeScreen() {
                         setActiveRequestRide(null);
                         setPendingRequest(null);
                         setOtpValidate(false);
+                        setInitialChatMessages([]);
                         AsyncStorage.removeItem('activeRideId');
                     }
                 }
@@ -1127,6 +1178,7 @@ export default function DriverHomeScreen() {
                 socket={socket.current}
                 rideId={currentRideId}
                 userId={userId}
+                initialMessages={initialChatMessages}
             />
         </View>
     );

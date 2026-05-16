@@ -4,8 +4,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Linking, M
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { getUserInfoApi } from '../../utils/services/userService';
+import { getUserInfoApi, getUserStatsApi } from '../../utils/services/userService';
 import { Roles } from '../../utils/services/rolesEnum';
 import { addVehicleApi, deleteVehicleApi, getUserVehicles, setActiveVehicle } from '../../utils/services/vehicleService';
 export default function ProfileScreen() {
@@ -13,6 +12,7 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [isVehiclesModalVisible, setIsVehiclesModalVisible] = useState(false);
   const [isAddVehicleModalVisible, setIsAddVehicleModalVisible] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ marca: '', modelo: '', placa: '', color: '' });
@@ -20,9 +20,11 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       getUserInfo(); // Cargar inmediatamente al entrar a la pestaña
+      getUserStats();
       loadRoleAndVehicles();
       const interval = setInterval(() => {
         getUserInfo();
+        getUserStats();
         loadRoleAndVehicles();
       }, 60000);
       return () => clearInterval(interval);
@@ -110,6 +112,15 @@ export default function ProfileScreen() {
     }
   }
 
+  const getUserStats = async () => {
+    try {
+      const response = await getUserStatsApi();
+      setStats(response);
+    } catch (error) {
+      console.log('Error loading profile stats', error);
+    }
+  }
+
   const handleLogout = () => {
     logout();
     alert("Sesión cerrada");
@@ -130,20 +141,47 @@ export default function ProfileScreen() {
         <Text style={styles.phone}>{user?.telefono}</Text>
       </View>
 
-      <View style={styles.statsRow}>
-        <View style={styles.statItem}>
-          <Text style={styles.statVal}>4.9</Text>
-          <Text style={styles.statLab}>Calificación</Text>
-        </View>
-        <View style={[styles.statItem, styles.borderLateral]}>
-          <Text style={styles.statVal}>124</Text>
-          <Text style={styles.statLab}>Viajes</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={styles.statVal}>$15.20</Text>
-          <Text style={styles.statLab}>Crédito</Text>
-        </View>
-      </View>
+      {role === Roles.DRIVER ? (
+        <>
+          <View style={styles.statsRow}>
+            <StatItem value={formatNumber(stats?.rating)} label="Calificación" />
+            <StatItem value={stats?.completedRides ?? 0} label="Carreras" bordered />
+            <StatItem value={formatMoney(stats?.pendingCardPayoutAmount)} label="Por cobrar" />
+          </View>
+          <View style={styles.insightGrid}>
+            <InsightCard icon="card-outline" label="Tarjeta pendientes" value={`${stats?.pendingCardPayoutCount ?? 0} carreras`} accent="#F59E0B" />
+            <InsightCard icon="cash-outline" label="Efectivo cobrado" value={formatMoney(stats?.cashPaidAmount)} accent="#10B981" />
+            <InsightCard icon="trending-up-outline" label="Promedio por carrera" value={formatMoney(stats?.averageRideValue)} accent="#1D4ED8" />
+            <InsightCard icon="close-circle-outline" label="Canceladas" value={stats?.cancelledRides ?? 0} accent="#EF4444" />
+          </View>
+          <ProfileSection title="Carreras con tarjeta por cobrar">
+            <RideList rides={stats?.pendingCardPayouts || []} emptyText="No tienes carreras pendientes por cobrar." />
+          </ProfileSection>
+          <ProfileSection title="Historial reciente">
+            <RideList rides={stats?.recentRides || []} emptyText="Aún no tienes carreras registradas." />
+          </ProfileSection>
+        </>
+      ) : (
+        <>
+          <View style={styles.statsRow}>
+            <StatItem value={stats?.completedRides ?? 0} label="Carreras" />
+            <StatItem value={formatMoney(stats?.averageRideValue)} label="Costo medio" bordered />
+            <StatItem value={stats?.cancelledRides ?? 0} label="Canceladas" />
+          </View>
+          <View style={styles.insightGrid}>
+            <InsightCard icon="star-outline" label="Tu reputación" value={formatNumber(stats?.passengerRating)} accent="#F59E0B" />
+            <InsightCard icon="wallet-outline" label="Total gastado" value={formatMoney(stats?.totalSpent)} accent="#1D4ED8" />
+            <InsightCard icon="card-outline" label="Pagado con tarjeta" value={formatMoney(stats?.cardPaymentsAmount)} accent="#7C3AED" />
+            <InsightCard icon="cash-outline" label="Pagado en efectivo" value={formatMoney(stats?.cashPaymentsAmount)} accent="#10B981" />
+          </View>
+          <ProfileSection title="Historial de pagos">
+            <RideList rides={stats?.paymentHistory || []} emptyText="Aún no tienes pagos registrados." />
+          </ProfileSection>
+          <ProfileSection title="Viajes recientes">
+            <RideList rides={stats?.recentRides || []} emptyText="Aún no tienes carreras registradas." />
+          </ProfileSection>
+        </>
+      )}
 
       <View style={styles.menuSection}>
         {role === Roles.DRIVER && (
@@ -286,6 +324,95 @@ function MenuOption({ icon, title, onPress }: any) {
   );
 }
 
+function formatMoney(value: any) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function formatNumber(value: any) {
+  return Number(value || 0).toFixed(1);
+}
+
+function statusLabel(status?: string) {
+  const labels: any = {
+    COMPLETED: 'Finalizada',
+    TO_RATING: 'Por calificar',
+    CANCELLED: 'Cancelada',
+    REQUESTED: 'Solicitada',
+    ACCEPTED: 'Aceptada',
+    IN_PROGRESS: 'En curso',
+    DRIVER_ARRIVED: 'Conductor llegó',
+  };
+  return labels[status || ''] || status || 'Sin estado';
+}
+
+function paymentLabel(payment?: any) {
+  if (!payment) return 'Sin pago';
+  const method = payment.method === 'CARD' ? 'Tarjeta' : 'Efectivo';
+  const status: any = {
+    PENDING: 'pendiente',
+    PAID: 'pagado',
+    CANCELLED: 'cancelado',
+    FAILED: 'fallido',
+    REFUNDED: 'reembolsado',
+  };
+  return `${method} · ${status[payment.status] || payment.status}`;
+}
+
+function StatItem({ value, label, bordered }: any) {
+  return (
+    <View style={[styles.statItem, bordered && styles.borderLateral]}>
+      <Text style={styles.statVal}>{value}</Text>
+      <Text style={styles.statLab}>{label}</Text>
+    </View>
+  );
+}
+
+function InsightCard({ icon, label, value, accent }: any) {
+  return (
+    <View style={styles.insightCard}>
+      <View style={[styles.insightIcon, { backgroundColor: `${accent}18` }]}>
+        <Ionicons name={icon} size={18} color={accent} />
+      </View>
+      <Text style={styles.insightValue}>{value}</Text>
+      <Text style={styles.insightLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ProfileSection({ title, children }: any) {
+  return (
+    <View style={styles.profileSection}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function RideList({ rides, emptyText }: any) {
+  if (!rides || rides.length === 0) {
+    return <Text style={styles.emptyText}>{emptyText}</Text>;
+  }
+
+  return (
+    <View>
+      {rides.slice(0, 5).map((ride: any) => (
+        <View key={ride.id} style={styles.rideCard}>
+          <View style={styles.rideTop}>
+            <Text style={styles.ridePrice}>{formatMoney(ride.finalPrice)}</Text>
+            <Text style={styles.rideStatus}>{statusLabel(ride.status)}</Text>
+          </View>
+          <Text style={styles.rideRoute} numberOfLines={1}>{ride.originAddress}</Text>
+          <Text style={styles.rideDestination} numberOfLines={1}>{ride.destinationAddress}</Text>
+          <View style={styles.rideMeta}>
+            <Text style={styles.rideMetaText}>{paymentLabel(ride.payment)}</Text>
+            <Text style={styles.rideMetaText}>{new Date(ride.createdAt).toLocaleDateString()}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { alignItems: 'center', paddingVertical: 40, backgroundColor: '#F8FAFC' },
@@ -301,7 +428,24 @@ const styles = StyleSheet.create({
   statVal: { fontSize: 18, fontWeight: 'bold', color: '#1D4ED8' },
   statLab: { fontSize: 12, color: '#9CA3AF' },
 
-  menuSection: { padding: 20 },
+  insightGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingTop: 16, gap: 10 },
+  insightCard: { width: '48%', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EEF2F7' },
+  insightIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  insightValue: { fontSize: 17, fontWeight: '800', color: '#111827' },
+  insightLabel: { fontSize: 12, color: '#6B7280', marginTop: 4 },
+
+  profileSection: { paddingHorizontal: 20, paddingTop: 22 },
+  sectionTitle: { fontSize: 17, fontWeight: '800', color: '#1E3A8A', marginBottom: 12 },
+  rideCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EEF2F7', marginBottom: 10 },
+  rideTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  ridePrice: { fontSize: 17, fontWeight: '800', color: '#1D4ED8' },
+  rideStatus: { fontSize: 12, fontWeight: '700', color: '#334155', backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  rideRoute: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  rideDestination: { fontSize: 13, color: '#6B7280', marginTop: 3 },
+  rideMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  rideMetaText: { fontSize: 12, color: '#9CA3AF' },
+
+  menuSection: { padding: 20, paddingTop: 12 },
   option: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
   optionLeft: { flexDirection: 'row', alignItems: 'center' },
   optionTitle: { marginLeft: 15, fontSize: 16, color: '#374151', fontWeight: '500' },

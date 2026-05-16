@@ -9,7 +9,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
 const Stack = createNativeStackNavigator();
 import * as Notifications from 'expo-notifications';
-import { Linking, Platform, TouchableOpacity, View, Text, AppState } from 'react-native';
+import { Linking, Platform, TouchableOpacity, View, Text, AppState, Alert, PermissionsAndroid } from 'react-native';
 import { AndroidNotificationPriority } from 'expo-notifications';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from './utils/context/AuthContext';
@@ -22,6 +22,9 @@ import TabNavigator from './src/navigation/TabNavigator';
 import * as Location from 'expo-location';
 import messaging from '@react-native-firebase/messaging';
 import { saveTokenInBackend } from './utils/services/userService';
+
+const RIDE_NOTIFICATION_CHANNEL_ID = 'rides-critical-v2';
+const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
 
 
 Location.startLocationUpdatesAsync("LOCATION_TASK", {
@@ -47,10 +50,10 @@ Notifications.setNotificationHandler({
 });
 
 if (Platform.OS === 'android') {
-  Notifications.setNotificationChannelAsync('rides-alerts', {
-    name: 'Alertas de Carreras',
+  Notifications.setNotificationChannelAsync(RIDE_NOTIFICATION_CHANNEL_ID, {
+    name: 'Carreras urgentes',
     importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
+    vibrationPattern: [0, 500, 250, 500, 250, 800],
     lightColor: '#FF231F7C',
     sound: 'notificacion.mp3', // Sonido personalizado
     bypassDnd: true, // Ayuda a saltar el modo 'No Molestar' si el usuario da permiso
@@ -62,6 +65,14 @@ if (Platform.OS === 'android') {
 }
 
 async function registerForPushNotificationsAsync() {
+  if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
+    const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+      Alert.alert('Notificaciones desactivadas', 'Activa las notificaciones para recibir nuevas carreras.');
+      return;
+    }
+  }
+
   const authStatus = await messaging().requestPermission();
   const enabled =
     authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
@@ -79,6 +90,38 @@ async function registerForPushNotificationsAsync() {
   } catch (error) {
     console.log('Error getting FCM token:', error);
   }
+}
+
+async function openRideFromNotification(remoteMessage?: any) {
+  const rideId = remoteMessage?.data?.rideId;
+  if (!rideId) {
+    Linking.openURL('citygo://').catch(err => console.log('Error abriendo app', err));
+    return;
+  }
+
+  await AsyncStorage.setItem('activeRideId', String(rideId));
+  Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => {
+    Linking.openURL('citygo://').catch(err => console.log('Error abriendo app', err));
+  });
+}
+
+async function showForegroundRideNotification(remoteMessage: any) {
+  const title = remoteMessage?.notification?.title || remoteMessage?.data?.title || 'Nueva solicitud de viaje';
+  const body = remoteMessage?.notification?.body || remoteMessage?.data?.body || 'Tienes una carrera disponible.';
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      sound: 'notificacion.mp3',
+      priority: Notifications.AndroidNotificationPriority.MAX,
+      data: {
+        ...remoteMessage?.data,
+        rideId: remoteMessage?.data?.rideId,
+      },
+    },
+    trigger: Platform.OS === 'android' ? { channelId: RIDE_NOTIFICATION_CHANNEL_ID } as any : null,
+  });
 }
 
 export function HomeNavigator() {
@@ -133,6 +176,7 @@ function RootNavigator() {
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async remoteMessage => {
       console.log('Nueva carrera recibida (Foreground):', remoteMessage);
+      await showForegroundRideNotification(remoteMessage);
     });
 
     return unsubscribe;
@@ -159,9 +203,23 @@ function RootNavigator() {
         await saveTokenInBackend(token);
       });
 
+      const unsubscribeNotificationOpened = messaging().onNotificationOpenedApp(openRideFromNotification);
+
+      messaging().getInitialNotification().then(openRideFromNotification);
+
+      const notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+        const rideId = response.notification.request.content.data?.rideId;
+        if (rideId) {
+          AsyncStorage.setItem('activeRideId', String(rideId));
+          Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => Linking.openURL('citygo://'));
+        }
+      });
+
       return () => {
         appStateSubscription.remove();
         unsubscribeTokenRefresh();
+        unsubscribeNotificationOpened();
+        notificationResponseSubscription.remove();
       };
     }
   }, [isLoggedIn]);
@@ -269,11 +327,8 @@ function RootNavigator() {
 
 messaging().setBackgroundMessageHandler(async remoteMessage => {
   console.log('Mensaje recibido en segundo plano:', remoteMessage);
-  if (Platform.OS === 'android') {
-    // Retrasar ligeramente para asegurar que se procesa el intent sobre otras aplicaciones
-    setTimeout(() => {
-      Linking.openURL('citygo://').catch(err => console.log('Error abriendo app', err));
-    }, 500);
+  if (remoteMessage?.data?.rideId) {
+    await AsyncStorage.setItem('activeRideId', String(remoteMessage.data.rideId));
   }
 });
 

@@ -9,9 +9,10 @@ interface ChatModalProps {
   socket: any;
   rideId: string | null;
   userId: string | null;
+  initialMessages?: any[];
 }
 
-export default function ChatModal({ visible, onClose, socket, rideId, userId }: ChatModalProps) {
+export default function ChatModal({ visible, onClose, socket, rideId, userId, initialMessages = [] }: ChatModalProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
@@ -19,6 +20,13 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId }: 
 
   useEffect(() => {
     if (!visible || !socket || !rideId || !userId) return;
+
+    setMessages(initialMessages.map((payload) => ({
+      id: payload.id || Math.random().toString(),
+      text: payload.text,
+      sender: payload.senderId === userId ? 'me' : 'other',
+      time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    })));
 
     // Escuchar mensajes nuevos desde el servidor
     const handleNewMessage = (payload: any) => {
@@ -44,7 +52,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId }: 
     return () => {
       socket.off('new_message', handleNewMessage);
     };
-  }, [visible, socket, rideId, userId]);
+  }, [visible, socket, rideId, userId, initialMessages]);
 
   const sendMessage = () => {
     if (inputText.trim() === '' || !socket || !rideId || !userId) return;

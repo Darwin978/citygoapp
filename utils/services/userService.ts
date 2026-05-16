@@ -68,6 +68,28 @@ export async function getUserInfoApi(token: string) {
     }
 }
 
+export async function getUserStatsApi() {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(endPoint.getUserStats, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch user stats');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Error during user stats fetch:', error);
+        throw error;
+    }
+}
+
 export async function getUserInfoApproved(token: string) {
     try {
         const response = await fetch(endPoint.getUserInfoApproved, {

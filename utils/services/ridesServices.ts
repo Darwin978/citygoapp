@@ -10,6 +10,7 @@ interface requestRideDto {
     destLat: number,
     destLng: number,
     finalPrice: number,
+    paymentMethod: 'CASH' | 'CARD',
 }
 export async function requestRideApi(data: requestRideDto) {
     try {
@@ -31,6 +32,28 @@ export async function requestRideApi(data: requestRideDto) {
         return responseData;
     } catch (error) {
         console.error('Error during login:', error);
+        throw error;
+    }
+}
+
+export async function getActiveRideApi() {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(endPoint.activeRide, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error('ACTIVE RIDE FETCH ERROR');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching active ride:', error);
         throw error;
     }
 }

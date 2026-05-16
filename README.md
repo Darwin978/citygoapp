@@ -6,4 +6,5 @@ Gris Plata,#E5E7EB,"Bordes del logo, fondos de inputs y separadores."
 Blanco Puro,#FFFFFF,Textos sobre azul y fondos de tarjetas.
 
 construir apk 
+npx expo prebuild --clean
 eas build -p android --profile preview
