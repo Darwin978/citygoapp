@@ -18,7 +18,7 @@ import { BACKEND_URL } from '../../utils/services/apiConfig';
 import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import RatingModal from '../components/RatingModal';
 import { sendRatingApi } from '../../utils/services/userService';
-import { coordsFromRideData, isActiveBackendRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
+import { coordsFromRideData, isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
@@ -65,6 +65,7 @@ export default function UserHomeScreen() {
     const [ratingModalVisible, setRatingModalVisible] = useState(false);
     const [rideId, setRideId] = useState<string | null>(null);
     const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
+    const [activeRideBackendStatus, setActiveRideBackendStatus] = useState<string | null>(null);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -140,17 +141,20 @@ export default function UserHomeScreen() {
                 vehicle: data.driverVehicle,
             });
             setDriverLocation(data.currentLocation);
+            setActiveRideBackendStatus('ACCEPTED');
             setStatus('ON_RIDE');
             await AsyncStorage.setItem('activeRideId', data.rideId);
             Alert.alert("¡Conductor asignado!", `${data.driverName} va en camino.`);
         });
 
         socket.current.on('driver_is_outside', (data: any) => {
+            setActiveRideBackendStatus(data?.status || 'DRIVER_ARRIVED');
             setStatus('ON_RIDE');
             Alert.alert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
         });
 
         socket.current.on('ride_started', (data: any) => {
+            setActiveRideBackendStatus(data?.status || 'IN_PROGRESS');
             setStatus('TO_DESTINO');
             Alert.alert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
         })
@@ -220,6 +224,7 @@ export default function UserHomeScreen() {
             destinationSearchRef.current?.setAddressText('');
 
             setStatus('TO_RATING');
+            setActiveRideBackendStatus('TO_RATING');
             centerOnUserLocation();
 
             // 3. Mostrar resumen
@@ -256,6 +261,7 @@ export default function UserHomeScreen() {
                 await AsyncStorage.setItem('activeRideId', activeRideId);
                 setCurrentRideId(activeRideId);
                 setRideId(activeRideId);
+                setActiveRideBackendStatus(response.status);
                 setOptvalue(response.rideData.otp);
                 setDriverInfo(response.rideData.driver);
                 setInitialChatMessages(response.rideData.messages || []);
@@ -293,6 +299,7 @@ export default function UserHomeScreen() {
                         await AsyncStorage.setItem('activeRideId', savedRideId);
                         setCurrentRideId(savedRideId);
                         setRideId(savedRideId);
+                        setActiveRideBackendStatus(response.status);
                         setOptvalue(response.rideData.otp);
                         setDriverInfo(response.rideData.driver);
                         setInitialChatMessages(response.rideData.messages || []);
@@ -544,6 +551,7 @@ export default function UserHomeScreen() {
 
             socket.current.emit('joinRide', response.id);
             setCurrentRideId(response.id);
+            setActiveRideBackendStatus('REQUESTED');
             await AsyncStorage.setItem('activeRideId', response.id);
             setStatus('SEARCHING');
 
@@ -566,6 +574,7 @@ export default function UserHomeScreen() {
                 if (response.status === 'success') {
                     await AsyncStorage.setItem('activeRideId', pendingRequest.tripId);
                     setCurrentRideId(pendingRequest.tripId);
+                    setActiveRideBackendStatus('ACCEPTED');
                     setActiveRequestRide(response.data);
                     // 1. Limpiar solicitudes pendientes del mapa
                     setAvailableRequests([]);
@@ -614,6 +623,7 @@ export default function UserHomeScreen() {
         setPickupAddress('');
         setDestinationAddress('');
         setOtpValidate(false);
+        setActiveRideBackendStatus(null);
         pickupSearchRef.current?.setAddressText('');
         destinationSearchRef.current?.setAddressText('');
         await AsyncStorage.removeItem('activeRideId');
@@ -916,13 +926,15 @@ export default function UserHomeScreen() {
                         <View style={styles.confirmCard}>
                             <Text style={[styles.statusLabel, { color: '#10B981' }]}>YA ESTAMOS EN CAMINO</Text>
 
-                            {/*<TouchableOpacity
+                            {isChatEnabledRideStatus(activeRideBackendStatus) && (
+                            <TouchableOpacity
                                 style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
                                 onPress={() => setIsChatVisible(true)}
                             >
                                 <Ionicons name="chatbubbles" size={20} color="white" />
                                 <Text style={styles.btnText}>Chat con Conductor</Text>
-                            </TouchableOpacity>*/}
+                            </TouchableOpacity>
+                            )}
                         </View>
                     </View>
                 ) : (
@@ -953,13 +965,15 @@ export default function UserHomeScreen() {
                             {optValue || otpCode}
                         </Text>
 
-                        {/*<TouchableOpacity
+                        {isChatEnabledRideStatus(activeRideBackendStatus) && (
+                        <TouchableOpacity
                             style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
                             onPress={() => setIsChatVisible(true)}
                         >
                             <Ionicons name="chatbubbles" size={20} color="white" />
                             <Text style={styles.btnText}>Chat con Conductor</Text>
-                        </TouchableOpacity>*/}
+                        </TouchableOpacity>
+                        )}
                     </View>
                 </View>
             )}

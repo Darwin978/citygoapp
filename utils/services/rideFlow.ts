@@ -22,6 +22,10 @@ export function isActiveBackendRideStatus(status?: string | null) {
     return activeRideStatuses.includes(status as BackendRideStatus);
 }
 
+export function isChatEnabledRideStatus(status?: string | null) {
+    return status === 'ACCEPTED' || status === 'DRIVER_ARRIVED' || status === 'IN_PROGRESS' || status === 'TO_DESTINO';
+}
+
 export function isTripInProgress(status?: string | null) {
     return status === 'IN_PROGRESS' || status === 'TO_DESTINO';
 }

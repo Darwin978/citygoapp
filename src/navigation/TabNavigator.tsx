@@ -18,20 +18,20 @@ export default function TabNavigator() {
       screenOptions={({ route }) => ({
         headerShown: false,
         // Estilo de la cabecera superior (Header)
-        headerStyle: { 
+        headerStyle: {
           backgroundColor: '#1D4ED8',
           elevation: 0, // Quita sombra en Android
           shadowOpacity: 0, // Quita sombra en iOS
         },
         headerTitleAlign: 'center',
-        headerTitleStyle: { 
-          color: 'white', 
-          fontWeight: '900', 
+        headerTitleStyle: {
+          color: 'white',
+          fontWeight: '900',
           fontSize: 20,
-          letterSpacing: 0.5 
+          letterSpacing: 0.5
         },
         headerTitle: "CityGo",
-        
+
         // Estilo de la barra inferior (Tab Bar)
         tabBarActiveTintColor: '#1D4ED8',
         tabBarInactiveTintColor: '#9CA3AF',
@@ -41,7 +41,7 @@ export default function TabNavigator() {
           fontWeight: '600',
           marginBottom: 5,
         },
-        tabBarStyle: { 
+        tabBarStyle: {
           height: 60 + insets.bottom, // Aumenta la altura para incluir el área segura
           paddingTop: 10,
           paddingBottom: insets.bottom > 0 ? insets.bottom : 20, // Asegura espacio para el área segura
@@ -49,7 +49,7 @@ export default function TabNavigator() {
           borderTopColor: '#E5E7EB',
           backgroundColor: 'white',
         },
-        
+
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: any;
 
@@ -63,8 +63,8 @@ export default function TabNavigator() {
 
           return (
             <View style={focused ? styles.activeTabIcon : null}>
-              <Ionicons 
-                name={iconName} 
+              <Ionicons
+                name={iconName}
                 size={24} // Usamos el size que viene por defecto
                 color={focused ? '#1D4ED8' : '#9CA3AF'} // Este color es #1D4ED8 cuando focused es true
               />
@@ -73,22 +73,22 @@ export default function TabNavigator() {
         },
       })}
     >
-      <Tab.Screen 
-        name="Mapa" 
-        component={HomeScreen} 
-        options={{ title: 'Explorar' }} 
+      <Tab.Screen
+        name="Mapa"
+        component={HomeScreen}
+        options={{ title: 'Explorar' }}
       />
-      <Tab.Screen 
+      {/*<Tab.Screen 
         name="Mensajes" 
         component={MessagesScreen} 
-        options={{ title: 'Mensajes', tabBarBadge: 2 }} // Badge para simular notificaciones
-      />
-      <Tab.Screen 
-        name="Perfil" 
-        component={ProfileScreen} 
+        options={{ title: 'Mensajes' }}
+      />*/}
+      <Tab.Screen
+        name="Perfil"
+        component={ProfileScreen}
         options={{ title: 'Mi Perfil' }}
       />
-      </Tab.Navigator>
+    </Tab.Navigator>
   );
 }
 

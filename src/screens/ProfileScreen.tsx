@@ -115,6 +115,7 @@ export default function ProfileScreen() {
   const getUserStats = async () => {
     try {
       const response = await getUserStatsApi();
+      console.log("response", response);
       setStats(response);
     } catch (error) {
       console.log('Error loading profile stats', error);

@@ -79,7 +79,9 @@ export async function getUserStatsApi() {
             }
         });
 
-        if (!response.ok) {
+        console.log("response", response);
+
+        if (!response) {
             throw new Error('Failed to fetch user stats');
         }
 

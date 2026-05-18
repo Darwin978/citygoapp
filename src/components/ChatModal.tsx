@@ -68,10 +68,10 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         style={styles.container}
       >
         <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top || 40 : insets.top + 10 }]}>
@@ -86,6 +86,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
           data={messages}
           keyExtractor={(item) => item.id}
           style={{ flex: 1, marginTop: 10 }}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <View style={[
               styles.bubble,
@@ -102,6 +103,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
           )}
           contentContainerStyle={styles.chatList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          ListEmptyComponent={<Text style={styles.emptyText}>Todavía no hay mensajes.</Text>}
         />
 
         <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 15) }]}>
@@ -111,8 +113,9 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
             value={inputText}
             onChangeText={setInputText}
             placeholderTextColor={'gray'}
+            multiline
           />
-          <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
+          <TouchableOpacity style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim()}>
             <Ionicons name="send" size={24} color="white" />
           </TouchableOpacity>
         </View>
@@ -142,6 +145,8 @@ const styles = StyleSheet.create({
   otherText: { color: '#374151' },
   timeText: { fontSize: 10, color: '#9CA3AF', marginTop: 5, alignSelf: 'flex-end' },
   inputArea: { flexDirection: 'row', padding: 15, backgroundColor: 'white', alignItems: 'center' },
-  input: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 25, paddingHorizontal: 20, height: 45 },
-  sendBtn: { backgroundColor: '#1D4ED8', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginLeft: 10 }
+  input: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 22, paddingHorizontal: 18, paddingVertical: 11, minHeight: 45, maxHeight: 110, color: '#111827' },
+  sendBtn: { backgroundColor: '#1D4ED8', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
+  sendBtnDisabled: { backgroundColor: '#93A8D8' },
+  emptyText: { color: '#6B7280', textAlign: 'center', marginTop: 40 }
 });
