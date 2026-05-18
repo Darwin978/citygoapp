@@ -332,17 +332,21 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
   }
 });
 
+import { AlertProvider } from './utils/context/AlertContext';
+
 export default function App() {
 
   return (
-    <AuthProvider>
-      <PermissionProvider>
-        <SafeAreaProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
-        </SafeAreaProvider>
-      </PermissionProvider>
-    </AuthProvider>
+    <AlertProvider>
+      <AuthProvider>
+        <PermissionProvider>
+          <SafeAreaProvider>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+          </SafeAreaProvider>
+        </PermissionProvider>
+      </AuthProvider>
+    </AlertProvider>
   );
 }

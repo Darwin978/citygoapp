@@ -19,12 +19,14 @@ import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } fro
 import RatingModal from '../components/RatingModal';
 import { sendRatingApi } from '../../utils/services/userService';
 import { coordsFromRideData, isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
+import { useCustomAlert } from '../../utils/context/AlertContext';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
 const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
 export default function UserHomeScreen() {
+    const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
@@ -144,19 +146,19 @@ export default function UserHomeScreen() {
             setActiveRideBackendStatus('ACCEPTED');
             setStatus('ON_RIDE');
             await AsyncStorage.setItem('activeRideId', data.rideId);
-            Alert.alert("¡Conductor asignado!", `${data.driverName} va en camino.`);
+            showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
         });
 
         socket.current.on('driver_is_outside', (data: any) => {
             setActiveRideBackendStatus(data?.status || 'DRIVER_ARRIVED');
             setStatus('ON_RIDE');
-            Alert.alert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
+            showAlert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
         });
 
         socket.current.on('ride_started', (data: any) => {
             setActiveRideBackendStatus(data?.status || 'IN_PROGRESS');
             setStatus('TO_DESTINO');
-            Alert.alert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
+            showAlert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
         })
 
         socket.current.on('driver_location_update', (newCoords: any) => {
@@ -184,7 +186,7 @@ export default function UserHomeScreen() {
             setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
             if (pendingRequest?.tripId === data.tripId) {
                 setShowRequestDialog(false);
-                Alert.alert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
             }
         });
 
@@ -209,7 +211,7 @@ export default function UserHomeScreen() {
             setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
             centerOnUserLocation();
 
-            Alert.alert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
+            showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
         });
 
         socket.current.on('ride_finished', async (data: any) => {
@@ -228,7 +230,7 @@ export default function UserHomeScreen() {
             centerOnUserLocation();
 
             // 3. Mostrar resumen
-            Alert.alert(
+            showAlert(
                 "¡Llegamos! Esperamos que hayas tenido un buen viaje, no olvides calificar al conductor",
             );
             setRatingModalVisible(true);
@@ -488,7 +490,7 @@ export default function UserHomeScreen() {
     };
 
     const handleCancelSolicitud = () => {
-        Alert.alert(
+        showAlert(
             'CityGo',
             '¿Estás seguro de cancelar la solicitud de viaje? Algunos conductores ya fueron notificados de tu solicitud',
             [
@@ -509,7 +511,7 @@ export default function UserHomeScreen() {
                             setCurrentRideId(null);
                         } catch (e) {
                             console.error(e);
-                            Alert.alert('Error', 'Hubo un problema al cancelar la solicitud.');
+                            showAlert('Error', 'Hubo un problema al cancelar la solicitud.');
                         }
                     },
                 },
@@ -596,15 +598,15 @@ export default function UserHomeScreen() {
                         longitudeDelta: 0.005,
                     }, 1000);
 
-                    Alert.alert("Viaje Asignado", "Dirígete al punto de recogida.");
+                    showAlert("Viaje Asignado", "Dirígete al punto de recogida.");
                 } else {
-                    Alert.alert("Error", response.message);
+                    showAlert("Error", response.message);
                     setShowRequestDialog(false);
                 }
             });
         } catch (e) {
             console.error(e);
-            Alert.alert('Error', 'Hubo un problema al aceptar la solicitud.');
+            showAlert('Error', 'Hubo un problema al aceptar la solicitud.');
         } finally {
             setLoading(false);
         }
@@ -639,10 +641,10 @@ export default function UserHomeScreen() {
                 comment,
             });
             console.log("Respuesta de la API:", response);
-            Alert.alert("Calificación enviada", "Gracias por tu comentario.");
+            showAlert("Calificación enviada", "Gracias por tu comentario.");
         } catch (e) {
             console.error(e);
-            Alert.alert("Error", "Hubo un problema al enviar la calificación.");
+            showAlert("Error", "Hubo un problema al enviar la calificación.");
         } finally {
             setRatingModalVisible(false);
             clearRideData();

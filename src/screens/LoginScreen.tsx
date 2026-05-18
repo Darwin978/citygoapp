@@ -16,8 +16,10 @@ import { loginApi } from '../../utils/services/userService';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from '../../utils/context/AuthContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCustomAlert } from '../../utils/context/AlertContext';
 
 export default function LoginScreen({ navigation }: any) {
+  const { showAlert } = useCustomAlert();
   const { login, aproveed } = useAuth()
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +28,7 @@ export default function LoginScreen({ navigation }: any) {
   const handleLogin = async () => {
     setLoading(true);
     if (!email || !password) {
-      Alert.alert("Error", "Por favor completa todos los campos");
+      showAlert("Error", "Por favor completa todos los campos");
       return;
     }
 
@@ -50,7 +52,7 @@ export default function LoginScreen({ navigation }: any) {
       aproveed(user.isApproved);
 
     } catch (error) {
-      Alert.alert("Error", "Credenciales incorrectas, por favor intenta de nuevo");
+      showAlert("Error", "Credenciales incorrectas, por favor intenta de nuevo");
     } finally {
       setLoading(false);
     }

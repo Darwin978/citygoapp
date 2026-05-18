@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { registerClientApi, registerDriverApi } from '../../utils/services/userService';
 import { Roles } from '../../utils/services/rolesEnum';
+import { useCustomAlert } from '../../utils/context/AlertContext';
 
 interface Vehicle {
   plate: string;
@@ -16,6 +17,7 @@ interface Vehicle {
 }
 
 export default function RegisterScreen({ navigation }: any) {
+  const { showAlert } = useCustomAlert();
   const [role, setRole] = useState<'CLIENT' | 'DRIVER'>('CLIENT');
   const [cedulaImage, setCedulaImage] = useState<string | null>(null);
 
@@ -35,7 +37,7 @@ export default function RegisterScreen({ navigation }: any) {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso requerido', 'Necesitamos acceso a la galería para verificar tu identidad.');
+      showAlert('Permiso requerido', 'Necesitamos acceso a la galería para verificar tu identidad.');
       return;
     }
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -64,21 +66,21 @@ export default function RegisterScreen({ navigation }: any) {
   const handleRegister = async () => {
 
     if (!nombre || !cedula || !email || !phone || !password || !confirmPassword) {
-      return Alert.alert("Error", "Por favor completa todos los campos");
+      return showAlert("Error", "Por favor completa todos los campos");
     }
     if (role === Roles.DRIVER) {
       for (let v of vehicles) {
         if (!v.plate || !v.brand || !v.model || !v.color) {
-          return Alert.alert("Error", "Completa la información de todos los vehículos o elimina los que no uses.");
+          return showAlert("Error", "Completa la información de todos los vehículos o elimina los que no uses.");
         }
       }
     }
-    if (!cedulaImage) return Alert.alert("Falta Identificación", "Debes subir la foto de tu cédula para continuar.");
-    if (!validarCedulaEcu(cedula)) return Alert.alert("Cédula Inválida", "El número de cédula no es correcto.");
+    if (!cedulaImage) return showAlert("Falta Identificación", "Debes subir la foto de tu cédula para continuar.");
+    if (!validarCedulaEcu(cedula)) return showAlert("Cédula Inválida", "El número de cédula no es correcto.");
     if (password.length < 8 || !/\d/.test(password)) {
-      return Alert.alert("Seguridad", "La clave debe tener 8+ caracteres y al menos un número.");
+      return showAlert("Seguridad", "La clave debe tener 8+ caracteres y al menos un número.");
     }
-    if (password !== confirmPassword) return Alert.alert("Error", "Las claves no coinciden.");
+    if (password !== confirmPassword) return showAlert("Error", "Las claves no coinciden.");
     const formData = new FormData();
 
     // Datos normales
@@ -105,10 +107,10 @@ export default function RegisterScreen({ navigation }: any) {
         const response = await registerClientApi(formData);
       }
 
-      Alert.alert("Registro Enviado", "Hemos almacenado tus datos ahora ya puedes iniciar sesión. Ten en cuenta que tu cuenta está pendiente de aprobación, te notificaremos una vez que sea aprobada.");
+      showAlert("Registro Enviado", "Hemos almacenado tus datos ahora ya puedes iniciar sesión. Ten en cuenta que tu cuenta está pendiente de aprobación, te notificaremos una vez que sea aprobada.");
       navigation.navigate('Login');
     } catch (error) {
-      Alert.alert("Error", "No se pudo subir la información");
+      showAlert("Error", "No se pudo subir la información");
     }
   };
 

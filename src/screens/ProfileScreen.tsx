@@ -7,7 +7,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserInfoApi, getUserStatsApi } from '../../utils/services/userService';
 import { Roles } from '../../utils/services/rolesEnum';
 import { addVehicleApi, deleteVehicleApi, getUserVehicles, setActiveVehicle } from '../../utils/services/vehicleService';
+import { useCustomAlert } from '../../utils/context/AlertContext';
+
 export default function ProfileScreen() {
+  const { showAlert } = useCustomAlert();
   const { logout } = useAuth();
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string | null>(null);
@@ -47,11 +50,11 @@ export default function ProfileScreen() {
 
   const handleAddVehicle = async () => {
     if (!newVehicle.marca || !newVehicle.modelo || !newVehicle.placa || !newVehicle.color) {
-      Alert.alert("Error", "Por favor llena todos los campos");
+      showAlert("Error", "Por favor llena todos los campos");
       return;
     }
     if (vehicles.length >= 3) {
-      Alert.alert("Límite alcanzado", "No puedes agregar más de 3 vehículos");
+      showAlert("Límite alcanzado", "No puedes agregar más de 3 vehículos");
       return;
     }
     try {
@@ -64,17 +67,17 @@ export default function ProfileScreen() {
       };
       const response = await addVehicleApi(vehicle);
       if (response) {
-        Alert.alert("Éxito", "Vehículo agregado correctamente");
+        showAlert("Éxito", "Vehículo agregado correctamente");
         await loadRoleAndVehicles();
         setNewVehicle({ marca: '', modelo: '', placa: '', color: '' });
         setIsAddVehicleModalVisible(false);
       } else {
-        Alert.alert("Error", "Error al agregar vehículo");
+        showAlert("Error", "Error al agregar vehículo");
       }
 
     } catch (error) {
       console.error('Error during vehicle add:', error);
-      Alert.alert("Error", "Error al agregar vehículo");
+      showAlert("Error", "Error al agregar vehículo");
     }
   };
 
@@ -82,25 +85,25 @@ export default function ProfileScreen() {
 
     const response = await setActiveVehicle(id);
     if (response) {
-      Alert.alert("Éxito", "Vehículo establecido como principal");
+      showAlert("Éxito", "Vehículo establecido como principal");
       await loadRoleAndVehicles();
     } else {
-      Alert.alert("Error", "Error al establecer vehículo como principal");
+      showAlert("Error", "Error al establecer vehículo como principal");
     }
   };
 
   const handleDeleteVehicle = async (id: string) => {
     const isPrincipal = vehicles.find(v => v.id === id)?.principal;
     if (isPrincipal) {
-      Alert.alert("Error", "No puedes eliminar el vehículo principal");
+      showAlert("Error", "No puedes eliminar el vehículo principal");
       return;
     }
     const response = await deleteVehicleApi(id);
     if (response) {
-      Alert.alert("Éxito", "Vehículo eliminado correctamente");
+      showAlert("Éxito", "Vehículo eliminado correctamente");
       await loadRoleAndVehicles();
     } else {
-      Alert.alert("Error", "Error al eliminar vehículo");
+      showAlert("Error", "Error al eliminar vehículo");
     }
   };
 
@@ -124,7 +127,7 @@ export default function ProfileScreen() {
 
   const handleLogout = () => {
     logout();
-    alert("Sesión cerrada");
+    showAlert("Éxito", "Sesión cerrada");
   }
 
   const handleSupport = () => {
@@ -188,9 +191,9 @@ export default function ProfileScreen() {
         {role === Roles.DRIVER && (
           <MenuOption icon="car-outline" title="Mis Vehículos" onPress={() => setIsVehiclesModalVisible(true)} />
         )}
-        <MenuOption icon="time-outline" title="Historial de viajes" />
+        {/*<MenuOption icon="time-outline" title="Historial de viajes" />*/}
         <MenuOption icon="card-outline" title="Métodos de pago" />
-        <MenuOption icon="notifications-outline" title="Notificaciones" />
+        {/*<MenuOption icon="notifications-outline" title="Notificaciones" />*/}
         <MenuOption icon="help-circle-outline" title="Soporte técnico" onPress={handleSupport} />
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutText}>Cerrar Sesión</Text>
@@ -226,7 +229,7 @@ export default function ProfileScreen() {
                       color={v.activeVehicleId == v.id ? "#1D4ED8" : "#9CA3AF"}
                     />
                     <TouchableOpacity onPress={() => {
-                      Alert.alert(
+                      showAlert(
                         "Eliminar Vehículo",
                         "¿Estás seguro de que deseas eliminar este vehículo?",
                         [

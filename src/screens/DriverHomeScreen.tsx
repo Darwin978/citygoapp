@@ -18,12 +18,14 @@ import * as Notifications from 'expo-notifications';
 import { updateStatusDriverApi } from '../../utils/services/userService';
 import ChatModal from '../components/ChatModal';
 import { isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToDriverScreen } from '../../utils/services/rideFlow';
+import { useCustomAlert } from '../../utils/context/AlertContext';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
 const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
 export default function DriverHomeScreen() {
+    const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
@@ -150,7 +152,7 @@ export default function DriverHomeScreen() {
             socket.current.emit('joinRide', data.rideId);
             setDriverInfo(data.driver);
             setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
-            Alert.alert("¡Conductor asignado!", `${data.driverName} va en camino.`);
+            showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
         });
 
         socket.current.on('locationUpdated', (newCoords: any) => {
@@ -175,7 +177,7 @@ export default function DriverHomeScreen() {
             setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
             if (pendingRequest?.tripId === data.tripId) {
                 setShowRequestDialog(false);
-                Alert.alert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
             }
         });
 
@@ -190,12 +192,12 @@ export default function DriverHomeScreen() {
             setInitialChatMessages([]);
             setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
 
-            Alert.alert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
+            showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
         });
 
         socket.current.on('driver_arrived', (data: any) => {
             setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
-            Alert.alert("¡Conductor Llegando!", `El conductoe llego a recogerte, sal ahora!`);
+            showAlert("¡Conductor Llegando!", `El conductoe llego a recogerte, sal ahora!`);
         });
 
         socket.current.on('ride_finished', async (data: any) => {
@@ -208,7 +210,7 @@ export default function DriverHomeScreen() {
             setStatus('IDLE');
 
             // 3. Mostrar resumen (Podrías navegar a una pantalla de Rating/Calificación)
-            Alert.alert(
+            showAlert(
                 "¡Llegamos!",
                 `${data.finalPrice}`
             );
@@ -477,7 +479,7 @@ export default function DriverHomeScreen() {
     }
 
     const handleCancelSolicitud = () => {
-        Alert.alert(
+        showAlert(
             'CityGo',
             '¿Estás seguro de cancelar la solicitud de viaje? Algunos conductores ya fueron notificados de tu solicitud',
             [
@@ -498,7 +500,7 @@ export default function DriverHomeScreen() {
                             setCurrentRideId(null);
                         } catch (e) {
                             console.error(e);
-                            Alert.alert('Error', 'Hubo un problema al cancelar la solicitud.');
+                            showAlert('Error', 'Hubo un problema al cancelar la solicitud.');
                         }
                     },
                 },
@@ -586,15 +588,15 @@ export default function DriverHomeScreen() {
                         longitudeDelta: 0.005,
                     }, 1000);
 
-                    Alert.alert("Viaje Asignado", "Dirígete al punto de recogida.");
+                    showAlert("Viaje Asignado", "Dirígete al punto de recogida.");
                 } else {
-                    Alert.alert("Error", response.message);
+                    showAlert("Error", response.message);
                     setShowRequestDialog(false);
                 }
             });
         } catch (e) {
             console.error(e);
-            Alert.alert('Error', 'Hubo un problema al aceptar la solicitud.');
+            showAlert('Error', 'Hubo un problema al aceptar la solicitud.');
         } finally {
             setLoading(false);
         }
@@ -608,7 +610,7 @@ export default function DriverHomeScreen() {
         socket.current.emit('driver_arrived', { rideId: currentRideId });
         setActiveRideBackendStatus('DRIVER_ARRIVED');
 
-        Alert.alert(
+        showAlert(
             "CityGo",
             "Has notificado al cliente que estás en el punto de recogida.",
             [{ text: "OK", onPress: () => setShowOtpModal(true) }]
@@ -632,18 +634,18 @@ export default function DriverHomeScreen() {
 
                 // Retrasamos la alerta ligeramente para que la animación de cierre del Modal termine y no la tape
                 setTimeout(() => {
-                    Alert.alert("¡Viaje Iniciado!", "Dirígete al destino final.");
+                    showAlert("¡Viaje Iniciado!", "Dirígete al destino final.");
                 }, 400);
             } else {
                 setOtpValidate(false);
                 setOtpCode('');
-                Alert.alert("Código Incorrecto", "El código no coincide. Verifica con el pasajero.");
+                showAlert("Código Incorrecto", "El código no coincide. Verifica con el pasajero.");
             }
         });
     };
 
     const handleFinishRide = () => {
-        Alert.alert(
+        showAlert(
             "Finalizar Viaje",
             "¿Confirmas que has llegado al destino y deseas finalizar la carrera?",
             [
@@ -653,7 +655,7 @@ export default function DriverHomeScreen() {
                         if (currentRideId) {
                             socket.current.emit('finish_trip', { rideId: currentRideId });
                         }
-                        Alert.alert("¡Viaje Finalizado!", "El viaje ha concluido con éxito.");
+                        showAlert("¡Viaje Finalizado!", "El viaje ha concluido con éxito.");
                         setStatus('PICKUP');
                         setCurrentRideId(null);
                         setActiveRideBackendStatus(null);
@@ -673,7 +675,7 @@ export default function DriverHomeScreen() {
         const lng = activeRequestRide?.ride?.originLng;
         if (lat && lng) {
             const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-            Linking.openURL(url).catch(() => Alert.alert('Error', 'No se pudo abrir la aplicación de mapas.'));
+            Linking.openURL(url).catch(() => showAlert('Error', 'No se pudo abrir la aplicación de mapas.'));
         }
     };
 
@@ -682,7 +684,7 @@ export default function DriverHomeScreen() {
         const lng = activeRequestRide?.ride?.destLng;
         if (lat && lng) {
             const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-            Linking.openURL(url).catch(() => Alert.alert('Error', 'No se pudo abrir la aplicación de mapas.'));
+            Linking.openURL(url).catch(() => showAlert('Error', 'No se pudo abrir la aplicación de mapas.'));
         }
     };
 
