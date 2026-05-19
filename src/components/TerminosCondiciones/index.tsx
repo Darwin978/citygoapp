@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Linking } from 're
 import colors from '../../../utils/style/colors';
 import { usePermissions } from '../../../utils/context/PermissionContext';
 
-export default function TerminosScreen({ navigation }:any) {
+export default function TerminosScreen({ navigation }: any) {
 
   const { acceptTerms } = usePermissions();
 
@@ -20,10 +20,10 @@ export default function TerminosScreen({ navigation }:any) {
         <Text style={styles.title}>Términos y Condiciones</Text>
 
         <Text style={styles.message}>
-          Para utilizar la aplicación debes aceptar los 
+          Para utilizar la aplicación debes aceptar los
           <Text
             style={styles.link}
-            onPress={() => Linking.openURL("citygoec.com")}
+            onPress={() => Linking.openURL("https://legal.citygoec.com/")}
           >
             {' '}Términos y Condiciones.
           </Text>

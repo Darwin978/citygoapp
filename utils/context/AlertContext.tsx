@@ -248,6 +248,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
   },
+  buttonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   flexButton: {
     flex: 1,
   },

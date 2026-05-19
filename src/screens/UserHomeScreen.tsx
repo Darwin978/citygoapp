@@ -107,134 +107,134 @@ export default function UserHomeScreen() {
                 auth: { token },
             });
 
-        socket.current.on('connect', () => {
-            console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
+            socket.current.on('connect', () => {
+                console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
 
-            if (role === Roles.DRIVER) {
-                console.log("Ingresa a getAvailableRides");
-                socket.current.emit('getAvailableRides', (rides: any[]) => {
-                    setAvailableRequests(rides);
+                if (role === Roles.DRIVER) {
+                    console.log("Ingresa a getAvailableRides");
+                    socket.current.emit('getAvailableRides', (rides: any[]) => {
+                        setAvailableRequests(rides);
+                    });
+                }
+            });
+
+            socket.current.on('newRideRequest', (req: any) => {
+                console.log("Nueva solicitud de viaje:", req);
+                setAvailableRequests(prevRequests => {
+                    // Evitar duplicados por si el socket reintenta el envío
+                    const exists = prevRequests.find(r => r.tripId === req.tripId);
+                    if (exists) return prevRequests;
+                    return [...prevRequests, req];
                 });
-            }
-        });
 
-        socket.current.on('newRideRequest', (req: any) => {
-            console.log("Nueva solicitud de viaje:", req);
-            setAvailableRequests(prevRequests => {
-                // Evitar duplicados por si el socket reintenta el envío
-                const exists = prevRequests.find(r => r.tripId === req.tripId);
-                if (exists) return prevRequests;
-                return [...prevRequests, req];
+                // Opcional: mostrar el diálogo solo para la más reciente
+                setPendingRequest(req);
+                setShowRequestDialog(true);
             });
 
-            // Opcional: mostrar el diálogo solo para la más reciente
-            setPendingRequest(req);
-            setShowRequestDialog(true);
-        });
+            socket.current.on('trip_accepted', async (data: any) => {
+                console.log("¡Viaje aceptado!", data);
+                socket.current.emit('joinRide', data.rideId);
+                setRideId(data.rideId);
+                setCurrentRideId(data.rideId);
 
-        socket.current.on('trip_accepted', async (data: any) => {
-            console.log("¡Viaje aceptado!", data);
-            socket.current.emit('joinRide', data.rideId);
-            setRideId(data.rideId);
-            setCurrentRideId(data.rideId);
-
-            setDriverInfo({
-                name: data.driverName,
-                vehicle: data.driverVehicle,
+                setDriverInfo({
+                    name: data.driverName,
+                    vehicle: data.driverVehicle,
+                });
+                setDriverLocation(data.currentLocation);
+                setActiveRideBackendStatus('ACCEPTED');
+                setStatus('ON_RIDE');
+                await AsyncStorage.setItem('activeRideId', data.rideId);
+                showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
             });
-            setDriverLocation(data.currentLocation);
-            setActiveRideBackendStatus('ACCEPTED');
-            setStatus('ON_RIDE');
-            await AsyncStorage.setItem('activeRideId', data.rideId);
-            showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
-        });
 
-        socket.current.on('driver_is_outside', (data: any) => {
-            setActiveRideBackendStatus(data?.status || 'DRIVER_ARRIVED');
-            setStatus('ON_RIDE');
-            showAlert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
-        });
+            socket.current.on('driver_is_outside', (data: any) => {
+                setActiveRideBackendStatus(data?.status || 'DRIVER_ARRIVED');
+                setStatus('ON_RIDE');
+                showAlert("¡Conductor Llegando!", data.message || "El conductor llegó a recogerte, sal ahora!");
+            });
 
-        socket.current.on('ride_started', (data: any) => {
-            setActiveRideBackendStatus(data?.status || 'IN_PROGRESS');
-            setStatus('TO_DESTINO');
-            showAlert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
-        })
+            socket.current.on('ride_started', (data: any) => {
+                setActiveRideBackendStatus(data?.status || 'IN_PROGRESS');
+                setStatus('TO_DESTINO');
+                showAlert("¡Viaje Iniciado!", data.message || "El conductor ha iniciado el viaje.");
+            })
 
-        socket.current.on('driver_location_update', (newCoords: any) => {
-            const coords = {
-                latitude: newCoords.coords.lat || newCoords.coords.latitude,
-                longitude: newCoords.coords.lng || newCoords.coords.longitude,
-                heading: newCoords.coords.heading || 0,
-            };
+            socket.current.on('driver_location_update', (newCoords: any) => {
+                const coords = {
+                    latitude: newCoords.coords.lat || newCoords.coords.latitude,
+                    longitude: newCoords.coords.lng || newCoords.coords.longitude,
+                    heading: newCoords.coords.heading || 0,
+                };
 
-            if (!coords.latitude || !coords.longitude) return;
+                if (!coords.latitude || !coords.longitude) return;
 
-            // Actualizamos la posición animada (Para que el carro no de saltos)
-            animatedDriverCoords.timing({
-                latitude: coords.latitude,
-                longitude: coords.longitude,
-                duration: 1000, // Duración del paso
-                useNativeDriver: false
-            } as any).start();
+                // Actualizamos la posición animada (Para que el carro no de saltos)
+                animatedDriverCoords.timing({
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    duration: 1000, // Duración del paso
+                    useNativeDriver: false
+                } as any).start();
 
-            // Guardamos el heading para la rotación del icono
-            setDriverLocation(coords);
-        });
+                // Guardamos el heading para la rotación del icono
+                setDriverLocation(coords);
+            });
 
-        socket.current.on('trip_taken', (data: { tripId: string }) => {
-            setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
-            if (pendingRequest?.tripId === data.tripId) {
-                setShowRequestDialog(false);
-                showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
-            }
-        });
+            socket.current.on('trip_taken', (data: { tripId: string }) => {
+                setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
+                if (pendingRequest?.tripId === data.tripId) {
+                    setShowRequestDialog(false);
+                    showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                }
+            });
 
-        socket.current.on('trip_completed_success', async () => {
-            // 1. Limpiar persistencia
-            await AsyncStorage.removeItem('activeRideId');
+            socket.current.on('trip_completed_success', async () => {
+                // 1. Limpiar persistencia
+                await AsyncStorage.removeItem('activeRideId');
 
-            // 2. Resetear estados de la UI
-            setCurrentRideId(null);
-            setPendingRequest(null);
-            setActiveRequestRide(null);
-            setDriverInfo(null);
-            setPickupCoords(null);
-            setDestinationCoords(null);
-            setRouteDetails(null);
-            setPickupAddress('');
-            setDestinationAddress('');
-            setOtpValidate(false);
-            pickupSearchRef.current?.setAddressText('');
-            destinationSearchRef.current?.setAddressText('');
+                // 2. Resetear estados de la UI
+                setCurrentRideId(null);
+                setPendingRequest(null);
+                setActiveRequestRide(null);
+                setDriverInfo(null);
+                setPickupCoords(null);
+                setDestinationCoords(null);
+                setRouteDetails(null);
+                setPickupAddress('');
+                setDestinationAddress('');
+                setOtpValidate(false);
+                pickupSearchRef.current?.setAddressText('');
+                destinationSearchRef.current?.setAddressText('');
 
-            setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
-            centerOnUserLocation();
+                setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
+                centerOnUserLocation();
 
-            showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
-        });
+                showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
+            });
 
-        socket.current.on('ride_finished', async (data: any) => {
-            // Guardamos el estado para calificar, pero limpiamos el mapa
-            setPickupCoords(null);
-            setDestinationCoords(null);
-            setRouteDetails(null);
-            setPickupAddress('');
-            setDestinationAddress('');
-            setOtpValidate(false);
-            pickupSearchRef.current?.setAddressText('');
-            destinationSearchRef.current?.setAddressText('');
+            socket.current.on('ride_finished', async (data: any) => {
+                // Guardamos el estado para calificar, pero limpiamos el mapa
+                setPickupCoords(null);
+                setDestinationCoords(null);
+                setRouteDetails(null);
+                setPickupAddress('');
+                setDestinationAddress('');
+                setOtpValidate(false);
+                pickupSearchRef.current?.setAddressText('');
+                destinationSearchRef.current?.setAddressText('');
 
-            setStatus('TO_RATING');
-            setActiveRideBackendStatus('TO_RATING');
-            centerOnUserLocation();
+                setStatus('TO_RATING');
+                setActiveRideBackendStatus('TO_RATING');
+                centerOnUserLocation();
 
-            // 3. Mostrar resumen
-            showAlert(
-                "¡Llegamos! Esperamos que hayas tenido un buen viaje, no olvides calificar al conductor",
-            );
-            setRatingModalVisible(true);
-        });
+                // 3. Mostrar resumen
+                showAlert(
+                    "¡Llegamos! Esperamos que hayas tenido un buen viaje, no olvides calificar al conductor",
+                );
+                setRatingModalVisible(true);
+            });
 
 
         };
@@ -295,9 +295,9 @@ export default function UserHomeScreen() {
                 if (savedRideId && socket.current) {
                     socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
                         if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
-                        AsyncStorage.removeItem('activeRideId');
-                        return;
-                    }
+                            AsyncStorage.removeItem('activeRideId');
+                            return;
+                        }
                         await AsyncStorage.setItem('activeRideId', savedRideId);
                         setCurrentRideId(savedRideId);
                         setRideId(savedRideId);
@@ -929,13 +929,13 @@ export default function UserHomeScreen() {
                             <Text style={[styles.statusLabel, { color: '#10B981' }]}>YA ESTAMOS EN CAMINO</Text>
 
                             {isChatEnabledRideStatus(activeRideBackendStatus) && (
-                            <TouchableOpacity
-                                style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
-                                onPress={() => setIsChatVisible(true)}
-                            >
-                                <Ionicons name="chatbubbles" size={20} color="white" />
-                                <Text style={styles.btnText}>Chat con Conductor</Text>
-                            </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
+                                    onPress={() => setIsChatVisible(true)}
+                                >
+                                    <Ionicons name="chatbubbles" size={20} color="white" />
+                                    <Text style={styles.btnText}>Chat con Conductor</Text>
+                                </TouchableOpacity>
                             )}
                         </View>
                     </View>
@@ -957,7 +957,7 @@ export default function UserHomeScreen() {
                         <View style={styles.clientInfoRow}>
                             <Ionicons name="car" size={24} color="#10B981" />
                             <Text style={styles.clientNameText}>
-                                {driverInfo?.name || 'Tu conductor'} llegará pronto
+                                Tu conductor llegará pronto
                             </Text>
                         </View>
                         <Text style={{ textAlign: 'center', marginTop: 15, color: '#6B7280' }}>
@@ -968,13 +968,13 @@ export default function UserHomeScreen() {
                         </Text>
 
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
-                        <TouchableOpacity
-                            style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
-                            onPress={() => setIsChatVisible(true)}
-                        >
-                            <Ionicons name="chatbubbles" size={20} color="white" />
-                            <Text style={styles.btnText}>Chat con Conductor</Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
+                                onPress={() => setIsChatVisible(true)}
+                            >
+                                <Ionicons name="chatbubbles" size={20} color="white" />
+                                <Text style={styles.btnText}>Chat con Conductor</Text>
+                            </TouchableOpacity>
                         )}
                     </View>
                 </View>

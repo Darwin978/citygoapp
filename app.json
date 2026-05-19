@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "cityGoApp",
+    "name": "CityGo",
     "slug": "cityGoApp",
     "scheme": "citygo",
     "version": "1.0.0",
@@ -8,6 +8,10 @@
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "notification": {
+      "icon": "./assets/notification_icon.png",
+      "color": "#1D4ED8"
+    },
     "splash": {
       "resizeMode": "cover",
       "backgroundColor": "#000000",

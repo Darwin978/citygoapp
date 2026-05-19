@@ -152,6 +152,7 @@ function RootNavigator() {
   const { termsAccepted, requestPermissions, locationGranted, requestOverlayPermission } = usePermissions();
 
   const [showSplash, setShowSplash] = useState(true);
+  const [permissionsSettled, setPermissionsSettled] = useState(false);
 
   useEffect(() => {
     const prepare = async () => {
@@ -183,11 +184,18 @@ function RootNavigator() {
   }, []);
 
   useEffect(() => {
-    requestPermissions();
+    const initPermissions = async () => {
+      setPermissionsSettled(false);
+      await requestPermissions();
+      if (isLoggedIn) {
+        await registerForPushNotificationsAsync();
+        await requestOverlayPermission();
+      }
+      setPermissionsSettled(true);
+    };
+    initPermissions();
 
     if (isLoggedIn) {
-      registerForPushNotificationsAsync();
-      requestOverlayPermission();
 
       // Actualizar token cada vez que la app vuelve al primer plano
       const appStateSubscription = AppState.addEventListener('change', nextAppState => {
@@ -224,7 +232,7 @@ function RootNavigator() {
     }
   }, [isLoggedIn]);
 
-  if (showSplash) {
+  if (showSplash || !permissionsSettled) {
     return <LoadingScreen />;
   }
 

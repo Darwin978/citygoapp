@@ -10,7 +10,7 @@ module.exports = function withNotificationIcon(config) {
   const empresa = "citygo";
 
   const iconMap = {
-    citygo: "assets/logo_fondo.png",
+    citygo: "assets/notification_icon.png",
   };
 
   const iconSource = iconMap[empresa];
@@ -68,6 +68,25 @@ module.exports = function withNotificationIcon(config) {
         "tools:replace": "android:resource",
       },
     });
+
+    const colorMetaData = app["meta-data"].find(
+      (m) => m.$["android:name"] === "com.google.firebase.messaging.default_notification_color"
+    );
+    if (colorMetaData) {
+      if (colorMetaData.$["tools:replace"]) {
+        colorMetaData.$["tools:replace"] += ",android:resource";
+      } else {
+        colorMetaData.$["tools:replace"] = "android:resource";
+      }
+    } else {
+      app["meta-data"].push({
+        $: {
+          "android:name": "com.google.firebase.messaging.default_notification_color",
+          "android:resource": "@color/notification_icon_color",
+          "tools:replace": "android:resource"
+        }
+      });
+    }
 
     return config;
   });
