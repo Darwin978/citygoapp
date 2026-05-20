@@ -17,7 +17,7 @@ import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
 import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import RatingModal from '../components/RatingModal';
-import { sendRatingApi } from '../../utils/services/userService';
+import { sendRatingApi, updateStatusDriverApi } from '../../utils/services/userService';
 import { coordsFromRideData, isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
 import { useCustomAlert } from '../../utils/context/AlertContext';
 
@@ -25,7 +25,7 @@ const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
 const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
-export default function UserHomeScreen() {
+export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriverOffline?: boolean, onOnline?: () => void }) {
     const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
     const [userId, setUserId] = useState<string | null>(null);
@@ -798,13 +798,19 @@ export default function UserHomeScreen() {
             </MapView>
 
             {/* Driver Interface - Online Toggle */}
-            {role === Roles.DRIVER && (isOnline || (status !== 'ROUTE' && status !== 'SEARCHING')) && (
-                <View style={[styles.driverInterface, { top: insets.top + (isOnline ? 10 : 150), zIndex: isOnline ? 2000 : 900 }]}>
+            {role === Roles.DRIVER && isDriverOffline && ['IDLE', 'PICKUP', 'DESTINATION', 'ROUTE'].includes(status) && (
+                <View style={[styles.driverInterface, { top: insets.top + 10, zIndex: 900 }]}>
                     <View style={styles.statusCard}>
                         <Text style={styles.statusText}>{isOnline ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}</Text>
                         <Switch
                             value={isOnline}
-                            onValueChange={setIsOnline}
+                            onValueChange={async (val) => {
+                                setIsOnline(val);
+                                await updateStatusDriverApi(val);
+                                if (val && onOnline) {
+                                    onOnline();
+                                }
+                            }}
                             trackColor={{ false: "#767577", true: "#81b0ff" }}
                             thumbColor={isOnline ? "#1D4ED8" : "#f4f3f4"}
                         />

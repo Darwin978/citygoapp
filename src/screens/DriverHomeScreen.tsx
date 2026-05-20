@@ -24,12 +24,14 @@ const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
 const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 
-export default function DriverHomeScreen() {
+export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void }) {
     const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
     const [isOnline, setIsOnline] = useState(false);
+    const isOnlineRef = useRef(isOnline);
+    useEffect(() => { isOnlineRef.current = isOnline; }, [isOnline]);
     const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'ON_RIDE' | 'REQUESTED' | 'ACCEPTED' | 'TO_PICKUP' | 'IN_PROGRESS' | 'TO_RATING' | 'COMPLETED' | 'CANCELLED'>('PICKUP');
     const [role, setRole] = useState<string | null>(null);
     const [routeDetails, setRouteDetails] = useState<any>(null);
@@ -193,6 +195,10 @@ export default function DriverHomeScreen() {
             setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
 
             showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
+            
+            if (!isOnlineRef.current && onOffline) {
+                onOffline();
+            }
         });
 
         socket.current.on('driver_arrived', (data: any) => {
@@ -214,6 +220,10 @@ export default function DriverHomeScreen() {
                 "¡Llegamos!",
                 `${data.finalPrice}`
             );
+            
+            if (!isOnlineRef.current && onOffline) {
+                onOffline();
+            }
         });
 
         };
@@ -473,9 +483,16 @@ export default function DriverHomeScreen() {
         }
     };
 
-    const handleChangeStatusDriver = async (status: boolean) => {
-        setIsOnline(status);
-        await updateStatusDriverApi(status);
+    const handleChangeStatusDriver = async (onlineStatus: boolean) => {
+        setIsOnline(onlineStatus);
+        await updateStatusDriverApi(onlineStatus);
+        if (!onlineStatus && onOffline) {
+            if (['IDLE', 'PICKUP', 'DESTINATION', 'ROUTE', 'SEARCHING'].includes(status)) {
+                onOffline();
+            } else {
+                showAlert('Modo Cliente', 'Pasarás a la vista de cliente al terminar tu carrera actual.');
+            }
+        }
     }
 
     const handleCancelSolicitud = () => {

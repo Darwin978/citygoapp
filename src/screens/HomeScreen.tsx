@@ -8,6 +8,7 @@ import UserHomeScreen from './UserHomeScreen';
 export default function HomeScreen() {
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isDriverOnline, setIsDriverOnline] = useState<boolean>(true); // Por defecto el conductor entra online, igual que antes
 
   useEffect(() => {
     const fetchRole = async () => {
@@ -32,7 +33,11 @@ export default function HomeScreen() {
   }
 
   if (role === Roles.DRIVER) {
-    return <DriverHomeScreen />;
+    if (isDriverOnline) {
+      return <DriverHomeScreen onOffline={() => setIsDriverOnline(false)} />;
+    } else {
+      return <UserHomeScreen onOnline={() => setIsDriverOnline(true)} isDriverOffline={true} />;
+    }
   }
 
   // Fallback a UserHomeScreen por defecto (o si el rol es USER/CLIENT)
