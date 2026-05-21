@@ -27,15 +27,7 @@ const RIDE_NOTIFICATION_CHANNEL_ID = 'rides-critical-v2';
 const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
 
 
-Location.startLocationUpdatesAsync("LOCATION_TASK", {
-  accuracy: Location.Accuracy.High,
-  timeInterval: 15000, // 15 segundos para la DB
-  distanceInterval: 20, // o cada 20 metros
-  foregroundService: {
-    notificationTitle: "CityGo está activo",
-    notificationBody: "Tu ubicación se está compartiendo para recibir viajes.",
-  },
-});
+
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -64,22 +56,29 @@ if (Platform.OS === 'android') {
   });
 }
 
-async function registerForPushNotificationsAsync() {
+async function registerForPushNotificationsAsync(shouldRequest = true) {
   if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
-    const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
-      Alert.alert('Notificaciones desactivadas', 'Activa las notificaciones para recibir nuevas carreras.');
-      return;
+    const hasPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    if (!hasPermission) {
+      if (shouldRequest) {
+        const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+        if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Notificaciones desactivadas', 'Activa las notificaciones para recibir nuevas carreras.');
+          return;
+        }
+      } else {
+        return;
+      }
     }
   }
 
-  const authStatus = await messaging().requestPermission();
+  const authStatus = shouldRequest ? await messaging().requestPermission() : await messaging().hasPermission();
   const enabled =
     authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
     authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
   if (!enabled) {
-    alert('¡Debes habilitar las notificaciones para recibir carreras!');
+    if (shouldRequest) alert('¡Debes habilitar las notificaciones para recibir carreras!');
     return;
   }
 
@@ -184,28 +183,37 @@ function RootNavigator() {
   }, []);
 
   useEffect(() => {
+    // Wait until the splash screen is hidden before requesting permissions
+    if (showSplash) return;
+
+    let isMounted = true;
     const initPermissions = async () => {
       setPermissionsSettled(false);
+      
+      // 1. Location (Sequential)
       await requestPermissions();
+      
+      // 2. Push & Overlay (Only if logged in)
       if (isLoggedIn) {
-        await registerForPushNotificationsAsync();
+        await registerForPushNotificationsAsync(true);
         await requestOverlayPermission();
       }
-      setPermissionsSettled(true);
+      
+      if (isMounted) {
+        setPermissionsSettled(true);
+      }
     };
     initPermissions();
 
     if (isLoggedIn) {
-
-      // Actualizar token cada vez que la app vuelve al primer plano
+      // Refresh token when app comes to foreground without requesting permissions again
       const appStateSubscription = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'active') {
-          console.log('App ha vuelto al primer plano. Verificando token FCM...');
-          registerForPushNotificationsAsync();
+          console.log('App ha vuelto al primer plano. Verificando token FCM sin pedir permisos...');
+          registerForPushNotificationsAsync(false);
         }
       });
 
-      // Escuchar también cuando Firebase decida refrescar el token internamente
       const unsubscribeTokenRefresh = messaging().onTokenRefresh(async (token) => {
         console.log('El token FCM se ha refrescado automáticamente:', token);
         await saveTokenInBackend(token);
@@ -224,13 +232,44 @@ function RootNavigator() {
       });
 
       return () => {
+        isMounted = false;
         appStateSubscription.remove();
         unsubscribeTokenRefresh();
         unsubscribeNotificationOpened();
         notificationResponseSubscription.remove();
       };
     }
-  }, [isLoggedIn]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isLoggedIn, showSplash]);
+
+
+
+  useEffect(() => {
+    const startLocation = async () => {
+      if (!isLoggedIn || !locationGranted) return;
+
+      const hasStarted = await Location.hasStartedLocationUpdatesAsync("LOCATION_TASK");
+
+      if (!hasStarted) {
+        await Location.startLocationUpdatesAsync("LOCATION_TASK", {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 15000, // 15 segundos para la DB
+          distanceInterval: 20, // o cada 20 metros
+          foregroundService: {
+            notificationTitle: "CityGo está activo",
+            notificationBody: "Tu ubicación se está compartiendo para recibir viajes.",
+          },
+        });
+      }
+    };
+
+    startLocation();
+  }, [isLoggedIn, locationGranted]);
+
+
 
   if (showSplash || !permissionsSettled) {
     return <LoadingScreen />;

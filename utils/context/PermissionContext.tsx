@@ -56,32 +56,75 @@ export const PermissionProvider = ({ children }: any) => {
     setTermsAccepted(true);
   };
 
+  let isRequestingOverlay = false;
+
   const requestOverlayPermission = async () => {
     if (Platform.OS !== "android") return;
+    if (isRequestingOverlay) return;
+    isRequestingOverlay = true;
 
-    const asked = await AsyncStorage.getItem("overlayAsked");
-    if (asked !== "true") {
-      await new Promise<void>((resolve) => {
+    try {
+      const asked = await AsyncStorage.getItem("overlayAsked");
+      if (asked !== "true") {
+        await new Promise<void>((resolve) => {
+          Alert.alert(
+            "Permiso Importante",
+            "Para que CityGo pueda aparecer sobre otras aplicaciones cuando tengas notificaciones de una carrera, habilita 'Mostrar sobre otras aplicaciones'.",
+            [
+              {
+                text: "En otro momento",
+                style: "cancel",
+                onPress: () => {
+                  AsyncStorage.setItem("overlayAsked", "true");
+                  resolve();
+                }
+              },
+              {
+                text: "Configurar",
+                onPress: async () => {
+                  await AsyncStorage.setItem("overlayAsked", "true");
+                  try {
+                    const IntentLauncher = require("expo-intent-launcher");
+                    await IntentLauncher.startActivityAsync(
+                      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION,
+                      { data: "package:com.citygo" }
+                    );
+                  } catch (e) {
+                    const { Linking } = require("react-native");
+                    Linking.openSettings();
+                  }
+                  resolve();
+                }
+              }
+            ]
+          );
+        });
+      }
+
+      const fullScreenAsked = await AsyncStorage.getItem("fullScreenIntentAsked");
+      if (Number(Platform.Version) < 34 || fullScreenAsked === "true") return;
+
+      return await new Promise<void>((resolve) => {
         Alert.alert(
-          "Permiso Importante",
-          "Para que CityGo pueda aparecer sobre otras aplicaciones cuando llegue una carrera, habilita 'Mostrar sobre otras aplicaciones'.",
+          "Alertas de carrera",
+          "Para mostrar carreras en pantalla completa incluso con el teléfono bloqueado, permite las notificaciones de pantalla completa de CityGo.",
           [
             {
               text: "En otro momento",
               style: "cancel",
               onPress: () => {
-                AsyncStorage.setItem("overlayAsked", "true");
+                AsyncStorage.setItem("fullScreenIntentAsked", "true");
                 resolve();
               }
             },
             {
               text: "Configurar",
               onPress: async () => {
-                await AsyncStorage.setItem("overlayAsked", "true");
+                await AsyncStorage.setItem("fullScreenIntentAsked", "true");
                 try {
                   const IntentLauncher = require("expo-intent-launcher");
                   await IntentLauncher.startActivityAsync(
-                    IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION,
+                    "android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT",
                     { data: "package:com.citygo" }
                   );
                 } catch (e) {
@@ -94,44 +137,9 @@ export const PermissionProvider = ({ children }: any) => {
           ]
         );
       });
+    } finally {
+      isRequestingOverlay = false;
     }
-
-    const fullScreenAsked = await AsyncStorage.getItem("fullScreenIntentAsked");
-    if (Number(Platform.Version) < 34 || fullScreenAsked === "true") return;
-
-    return new Promise<void>((resolve) => {
-      Alert.alert(
-        "Alertas de carrera",
-        "Para mostrar carreras en pantalla completa incluso con el teléfono bloqueado, permite las notificaciones de pantalla completa de CityGo.",
-        [
-          {
-            text: "En otro momento",
-            style: "cancel",
-            onPress: () => {
-              AsyncStorage.setItem("fullScreenIntentAsked", "true");
-              resolve();
-            }
-          },
-          {
-            text: "Configurar",
-            onPress: async () => {
-              await AsyncStorage.setItem("fullScreenIntentAsked", "true");
-              try {
-                const IntentLauncher = require("expo-intent-launcher");
-                await IntentLauncher.startActivityAsync(
-                  "android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT",
-                  { data: "package:com.citygo" }
-                );
-              } catch (e) {
-                const { Linking } = require("react-native");
-                Linking.openSettings();
-              }
-              resolve();
-            }
-          }
-        ]
-      );
-    });
   };
 
   return (
