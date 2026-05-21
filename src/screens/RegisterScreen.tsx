@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Image, Alert, KeyboardAvoidingView, Platform
+  Image, Alert, KeyboardAvoidingView, Platform, ActivityIndicator
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +29,7 @@ export default function RegisterScreen({ navigation }: any) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [vehicles, setVehicles] = useState<Vehicle[]>([{ plate: '', brand: '', model: '', color: '' }]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Color constante para placeholders (Gris oscuro para fondo blanco)
   const placeholderColor = "#6B7280";
@@ -100,6 +101,7 @@ export default function RegisterScreen({ navigation }: any) {
     } as any);
 
     try {
+      setIsLoading(true);
       if (role === Roles.DRIVER) {
         const response = await registerDriverApi(formData);
       }
@@ -111,6 +113,8 @@ export default function RegisterScreen({ navigation }: any) {
       navigation.navigate('Login');
     } catch (error) {
       showAlert("Error", "No se pudo subir la información");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -212,8 +216,16 @@ export default function RegisterScreen({ navigation }: any) {
           )}
         </View>
 
-        <TouchableOpacity style={styles.btnPrimary} onPress={handleRegister}>
-          <Text style={styles.btnText}>Enviar para Aprobación</Text>
+        <TouchableOpacity 
+          style={[styles.btnPrimary, isLoading && { opacity: 0.7 }]} 
+          onPress={handleRegister}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.btnText}>Enviar para Aprobación</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
