@@ -130,13 +130,12 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     sound: 'notificacion.mp3', // o 'default' si falla
                     data: { tripId: req.tripId },
                 },
-                trigger: null, // Se muestra inmediatamente
+                trigger: Platform.OS === 'android' ? { channelId: 'rides-critical-v2' } as any : null,
             });
 
             setAvailableRequests(prevRequests => {
-                // Evitar duplicados por si el socket reintenta el envío
-                const exists = prevRequests.find(r => r.tripId === req.tripId);
-                if (exists) return prevRequests;
+                const reqExists = prevRequests.some(r => r.tripId === req.tripId);
+                if (reqExists) return prevRequests;
                 return [...prevRequests, req];
             });
 
@@ -592,6 +591,8 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     if (myLocation) {
                         socket.current.emit('updateLocation', { rideId: pendingRequest.tripId, coords: myLocation });
                     }
+                    
+                    socket.current.emit('joinRide', pendingRequest.tripId);
 
                     // 3. Centrar mapa en el cliente para ir a recogerlo
                     const pickup = {

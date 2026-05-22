@@ -19,29 +19,37 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    if (!visible || !socket || !rideId || !userId) return;
+    if (initialMessages && initialMessages.length > 0) {
+      setMessages(initialMessages.map((payload) => ({
+        id: payload.id || Math.random().toString(),
+        text: payload.text,
+        sender: payload.senderId === userId ? 'me' : 'other',
+        time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })));
+    }
+  }, [initialMessages, userId]);
 
-    setMessages(initialMessages.map((payload) => ({
-      id: payload.id || Math.random().toString(),
-      text: payload.text,
-      sender: payload.senderId === userId ? 'me' : 'other',
-      time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    })));
+  useEffect(() => {
+    if (!socket || !rideId || !userId) return;
 
-    // Escuchar mensajes nuevos desde el servidor
+    // Escuchar mensajes nuevos desde el servidor (SIEMPRE, incluso oculto)
     const handleNewMessage = (payload: any) => {
       const isMe = payload.senderId === userId;
 
       const incomingMsg = {
-        id: Math.random().toString(),
+        id: payload.id || Math.random().toString(),
         text: payload.text,
         sender: isMe ? 'me' : 'other',
         time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      setMessages((prev) => [...prev, incomingMsg]);
+      setMessages((prev) => {
+        // Evitar mensajes duplicados
+        if (prev.some(m => m.id === incomingMsg.id)) return prev;
+        return [...prev, incomingMsg];
+      });
       
-      // Scroll to bottom
+      // Intentar scroll, no pasa nada si está cerrado (ref es null)
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -52,7 +60,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
     return () => {
       socket.off('new_message', handleNewMessage);
     };
-  }, [visible, socket, rideId, userId, initialMessages]);
+  }, [socket, rideId, userId]);
 
   const sendMessage = () => {
     if (inputText.trim() === '' || !socket || !rideId || !userId) return;

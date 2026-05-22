@@ -116,7 +116,7 @@ async function showForegroundRideNotification(remoteMessage: any) {
       priority: Notifications.AndroidNotificationPriority.MAX,
       data: {
         ...remoteMessage?.data,
-        rideId: remoteMessage?.data?.rideId,
+        rideId: remoteMessage?.data?.rideId || remoteMessage?.data?.tripId,
       },
     },
     trigger: Platform.OS === 'android' ? { channelId: RIDE_NOTIFICATION_CHANNEL_ID } as any : null,
@@ -374,8 +374,24 @@ function RootNavigator() {
 
 messaging().setBackgroundMessageHandler(async remoteMessage => {
   console.log('Mensaje recibido en segundo plano:', remoteMessage);
-  if (remoteMessage?.data?.rideId) {
-    await AsyncStorage.setItem('activeRideId', String(remoteMessage.data.rideId));
+
+  // 1. Forzar Notificación Local (Hace sonar el dispositivo con prioridad máxima y bypass DND)
+  await showForegroundRideNotification(remoteMessage);
+
+  const rideId = remoteMessage?.data?.rideId || remoteMessage?.data?.tripId;
+
+  if (rideId) {
+    await AsyncStorage.setItem('activeRideId', String(rideId));
+
+    // 2. Traer la App al Primer Plano (Requiere el permiso Overlay que ya solicitamos)
+    if (Platform.OS === 'android') {
+      setTimeout(() => {
+        Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(err => {
+          console.log('Error abriendo deep link en segundo plano', err);
+          Linking.openURL('citygo://');
+        });
+      }, 500);
+    }
   }
 });
 
