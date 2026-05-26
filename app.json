@@ -26,7 +26,13 @@
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Utilizamos tu ubicación para mostrar tu posición en el mapa y ayudarte a localizar y monitorear las carreras",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Utilizamos tu ubicación para permitir el monitoreo continuo de carreras."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Utilizamos tu ubicación para permitir el monitoreo continuo de carreras incluso con la app en segundo plano.",
+        "NSLocationAlwaysUsageDescription": "Necesitamos tu ubicación en todo momento para enviarte carreras mientras usas otras apps.",
+        "UIBackgroundModes": [
+          "location",
+          "remote-notification",
+          "fetch"
+        ]
       }
     },
     "android": {
@@ -38,7 +44,9 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
         "USE_FULL_SCREEN_INTENT",
         "VIBRATE",
@@ -69,6 +77,16 @@
           "sounds": [
             "./assets/notificacion.mp3"
           ]
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Permite a CityGo acceder a tu ubicación siempre para recibir carreras en segundo plano.",
+          "locationAlwaysPermission": "Permite a CityGo acceder a tu ubicación siempre.",
+          "locationWhenInUsePermission": "Permite a CityGo acceder a tu ubicación mientras la app está en uso.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       "./plugins/withModularHeadersIOS",

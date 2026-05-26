@@ -1,6 +1,6 @@
 
-export const BACKEND_URL = process.env.BACKEND_URL || 'https://api.citygoec.com';
-//export const BACKEND_URL = 'http://192.168.1.252:3000';
+//export const BACKEND_URL = process.env.BACKEND_URL || 'https://api.citygoec.com';
+export const BACKEND_URL = 'http://192.168.1.99:3000';
 export const endPoint = {
     login: `${BACKEND_URL}/auth/login`,
     registerClient: `${BACKEND_URL}/auth/register/client`,
@@ -19,4 +19,5 @@ export const endPoint = {
     saveToken: `${BACKEND_URL}/users/save-token`,
     updateStatusDriver: `${BACKEND_URL}/driver/update-status`,
     sendRating: `${BACKEND_URL}/rating`,
+    updateLocation: `${BACKEND_URL}/driver/location`,
 }

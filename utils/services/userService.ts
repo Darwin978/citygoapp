@@ -180,6 +180,24 @@ export async function saveTokenInBackend(token: string) {
     }
 }
 
+/**
+ * Actualiza la ubicación del conductor vía REST.
+ * Usada desde la tarea de background (LOCATION_TASK) donde el WebSocket
+ * no está disponible porque la app puede estar suspendida.
+ */
+export async function updateLocationBgApi(lat: number, lng: number): Promise<void> {
+    const token = await AsyncStorage.getItem('authToken');
+    if (!token) return;
+    await fetch(endPoint.updateLocation, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ lat, lng }),
+    });
+}
+
 export async function sendRatingApi(ratingData: any) {
     try {
         console.log("Ingresa envio de rating", ratingData);

@@ -146,7 +146,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setActiveRideBackendStatus('ACCEPTED');
                 setStatus('ON_RIDE');
                 await AsyncStorage.setItem('activeRideId', data.rideId);
-                showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
+                showAlert("¡Conductor asignado!", `Tu conductor va en camino.`);
             });
 
             socket.current.on('driver_is_outside', (data: any) => {
@@ -379,10 +379,13 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             setStatus('DESTINATION');
             setLoading(false);
         } else if (status === 'DESTINATION') {
-            const coords = { latitude: region.latitude, longitude: region.longitude };
-            await setDestinationCoords(coords);
-            await getAddressFromCoords(coords.latitude, coords.longitude, false);
-            await getPrice(coords);
+            const destCoords = { latitude: region.latitude, longitude: region.longitude };
+            // Pickup puede no estar en estado actualizado si venimos del buscador;
+            // lo leemos de pickupCoords (ya fue seteado en el paso anterior).
+            const origin = pickupCoords ?? { latitude: region.latitude, longitude: region.longitude };
+            setDestinationCoords(destCoords);
+            await getAddressFromCoords(destCoords.latitude, destCoords.longitude, false);
+            await getPrice(destCoords, origin);
             setLoading(false);
         }
     };
@@ -412,12 +415,20 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             setStatus('DESTINATION');
         } else {
             setDestinationCoords(coords);
-            if (!pickupCoords) {
-                const currentCoords = { latitude: region.latitude, longitude: region.longitude };
-                setPickupCoords(currentCoords);
-                getAddressFromCoords(currentCoords.latitude, currentCoords.longitude, true);
+
+            // Si el pickup aún no estaba fijado, usamos la posición actual del mapa.
+            // Guardamos la referencia local para pasársela a getPrice de inmediato,
+            // porque setPickupCoords es async y el estado no se actualiza en este ciclo.
+            let effectivePickup = pickupCoords;
+            if (!effectivePickup) {
+                effectivePickup = { latitude: region.latitude, longitude: region.longitude };
+                setPickupCoords(effectivePickup);
+                getAddressFromCoords(effectivePickup.latitude, effectivePickup.longitude, true);
             }
-            setStatus('ROUTE');
+
+            // Calcular precio pasando el pickup explícitamente (evita closure stale).
+            // getPrice cambia el status a 'ROUTE' internamente.
+            getPrice(coords, effectivePickup);
         }
         mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 1000);
     };
@@ -470,20 +481,26 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         return driverLocation;
     };
     const driverLocationUser = useDriverTracking();
-    const getPrice = async (destinationCoords: { latitude: number, longitude: number }) => {
+    // explicitPickup: cuando se llama desde moveToLocation el pickupCoords del estado
+    // puede no estar actualizado todavía (closure stale), así que se pasa explícitamente.
+    const getPrice = async (
+        destinationCoords: { latitude: number, longitude: number },
+        explicitPickup?: { latitude: number, longitude: number },
+    ) => {
+        const origin = explicitPickup ?? pickupCoords;
+        if (!origin) return;
         try {
-            const price = await getPriceApi(pickupCoords.latitude, pickupCoords.longitude, destinationCoords.latitude, destinationCoords.longitude);
+            const price = await getPriceApi(origin.latitude, origin.longitude, destinationCoords.latitude, destinationCoords.longitude);
             setPrice(price.total);
             setDistance(price.distance);
             setTime(price.duration);
             setError(null);
             setStatus('ROUTE');
-
         } catch (e) {
             setPrice(0);
             setDistance(0);
             setTime(0);
-            setError("TUVIMOS UN PROBLEMA AL OBTENER EL PRECIO, PERO EL CONDUCTOR TE DARA SU MEJOR TARIFA SI DECIDES CONTINUAR!");
+            setError("TUVIMOS UN PROBLEMA AL OBTENER EL PRECIO, PERO EL CONDUCTOR TE DARÁ SU MEJOR TARIFA SI DECIDES CONTINUAR!");
             console.warn("Could not get price", e);
             setStatus('ROUTE');
         }
@@ -821,46 +838,103 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             {/* Buscadores Flotantes */}
             {!isOnline && status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'TO_DESTINO' && status !== 'SEARCHING' && (
                 <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
-                    <GooglePlacesAutocomplete
-                        ref={pickupSearchRef}
-                        placeholder="¿Recogida?"
-                        fetchDetails={true}
-                        onPress={(data, details) => {
-                            setPickupAddress(data.description || details?.formatted_address || '');
-                            moveToLocation(details, true);
-                        }}
-                        query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
-                        styles={{
-                            container: { flex: 0, width: '100%', marginBottom: 10, zIndex: 2 },
-                            listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
-                            textInput: styles.searchInput,
-                            row: { padding: 13, height: 44, flexDirection: 'row' },
-                        }}
-                        enablePoweredByContainer={false}
-                        keyboardShouldPersistTaps="handled"
-                        listUnderlayColor="#f0f0f0"
-                        textInputProps={{ placeholderTextColor: '#6B7280' }}
-                    />
-                    <GooglePlacesAutocomplete
-                        ref={destinationSearchRef}
-                        placeholder="¿Destino?"
-                        fetchDetails={true}
-                        onPress={(data, details) => {
-                            setDestinationAddress(data.description || details?.formatted_address || '');
-                            moveToLocation(details, false);
-                        }}
-                        query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
-                        styles={{
-                            container: { flex: 0, width: '100%', zIndex: 1 },
-                            listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
-                            textInput: styles.searchInput,
-                            row: { padding: 13, height: 44, flexDirection: 'row' },
-                        }}
-                        enablePoweredByContainer={false}
-                        keyboardShouldPersistTaps="handled"
-                        listUnderlayColor="#f0f0f0"
-                        textInputProps={{ placeholderTextColor: '#6B7280' }}
-                    />
+
+                    {/* Pickup */}
+                    <View style={styles.searchRow}>
+                        <View style={styles.searchDot} />
+                        <View style={{ flex: 1 }}>
+                            <GooglePlacesAutocomplete
+                                ref={pickupSearchRef}
+                                placeholder="¿Dónde te recogemos?"
+                                fetchDetails={true}
+                                onPress={(data, details) => {
+                                    if (!details) return;
+                                    setPickupAddress(data.description || details.formatted_address || '');
+                                    moveToLocation(details, true);
+                                }}
+                                query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                                styles={{
+                                    container: { flex: 0, width: '100%', zIndex: 2 },
+                                    listView: {
+                                        backgroundColor: 'white',
+                                        borderRadius: 10,
+                                        elevation: 8,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.15,
+                                        shadowRadius: 4,
+                                        position: 'absolute',
+                                        top: 46,
+                                        left: 0,
+                                        right: 0,
+                                        zIndex: 9999,
+                                    },
+                                    textInput: styles.searchInput,
+                                    row: { padding: 13, height: 44, flexDirection: 'row' },
+                                    separator: { height: 0.5, backgroundColor: '#F3F4F6' },
+                                }}
+                                enablePoweredByContainer={false}
+                                keyboardShouldPersistTaps="handled"
+                                listUnderlayColor="#F3F4F6"
+                                textInputProps={{
+                                    placeholderTextColor: '#9CA3AF',
+                                    clearButtonMode: 'while-editing',
+                                }}
+                            />
+                        </View>
+                    </View>
+
+                    <View style={styles.searchDivider} />
+
+                    {/* Destination */}
+                    <View style={styles.searchRow}>
+                        <View style={[styles.searchDot, styles.searchDotDestination]} />
+                        <View style={{ flex: 1 }}>
+                            <GooglePlacesAutocomplete
+                                ref={destinationSearchRef}
+                                placeholder="¿A dónde vas?"
+                                fetchDetails={true}
+                                onPress={(data, details) => {
+                                    if (!details) return;
+                                    setDestinationAddress(data.description || details.formatted_address || '');
+                                    moveToLocation(details, false);
+                                }}
+                                query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                                styles={{
+                                    container: { flex: 0, width: '100%', zIndex: 1 },
+                                    listView: {
+                                        backgroundColor: 'white',
+                                        borderRadius: 10,
+                                        elevation: 8,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.15,
+                                        shadowRadius: 4,
+                                        position: 'absolute',
+                                        top: 46,
+                                        left: 0,
+                                        right: 0,
+                                        zIndex: 9998,
+                                    },
+                                    textInput: styles.searchInput,
+                                    row: { padding: 13, height: 44, flexDirection: 'row' },
+                                    separator: { height: 0.5, backgroundColor: '#F3F4F6' },
+                                }}
+                                enablePoweredByContainer={false}
+                                keyboardShouldPersistTaps="handled"
+                                listUnderlayColor="#F3F4F6"
+                                textInputProps={{
+                                    placeholderTextColor: '#9CA3AF',
+                                    clearButtonMode: 'while-editing',
+                                }}
+                            />
+                        </View>
+                    </View>
+
+                    {/* Hint: también pueden mover el mapa */}
+                    <Text style={styles.searchHint}>
+                        💡 También puedes mover el mapa y confirmar con el botón de abajo
+                    </Text>
                 </View>
             )}
 
@@ -1180,22 +1254,55 @@ const styles = StyleSheet.create({
         width: '90%',
         alignSelf: 'center',
         backgroundColor: 'white',
-        borderRadius: 15,
-        padding: 10,
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 10,
-        zIndex: 1000, // IMPORTANTE: Debe estar por encima del mapa
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 12,
+        zIndex: 1000,
+        overflow: 'visible',
+    },
+    searchRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        paddingVertical: 2,
+    },
+    searchDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: '#1D4ED8',
+        marginTop: 16,
+        marginRight: 10,
+        marginLeft: 2,
+        flexShrink: 0,
+    },
+    searchDotDestination: {
+        backgroundColor: '#EF4444',
+    },
+    searchDivider: {
+        width: 2,
+        height: 10,
+        backgroundColor: '#E5E7EB',
+        marginLeft: 8,
     },
     searchInput: {
-        height: 45,
+        height: 44,
         backgroundColor: '#F3F4F6',
         borderRadius: 10,
-        paddingHorizontal: 15,
-        fontSize: 15,
+        paddingHorizontal: 12,
+        fontSize: 14,
         color: '#374151',
+    },
+    searchHint: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        textAlign: 'center',
+        marginTop: 6,
+        marginBottom: 2,
     },
     requestMarker: {
         alignItems: 'center',

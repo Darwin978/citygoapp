@@ -14,7 +14,6 @@ import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
 import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import MapZoomControls from '../components/MapZoomControls';
-import * as Notifications from 'expo-notifications';
 import { updateStatusDriverApi } from '../../utils/services/userService';
 import ChatModal from '../components/ChatModal';
 import { isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToDriverScreen } from '../../utils/services/rideFlow';
@@ -122,16 +121,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         socket.current.on('newRideRequest', async (req: any) => {
             console.log("Nueva solicitud de viaje:", req);
 
-            // Disparar la notificación Heads-Up
-            await Notifications.scheduleNotificationAsync({
-                content: {
-                    title: "¡Nueva Solicitud de Viaje!",
-                    body: "Un cliente cerca necesita transporte.",
-                    sound: 'notificacion.mp3', // o 'default' si falla
-                    data: { tripId: req.tripId },
-                },
-                trigger: Platform.OS === 'android' ? { channelId: 'rides-critical-v2' } as any : null,
-            });
+            // NOTA: la notificación (sonido + vibración + Full Screen Intent) ya la
+            // muestra App.tsx a través del handler onMessage de Firebase.
+            // Aquí solo actualizamos el estado de la UI para mostrar el diálogo.
 
             setAvailableRequests(prevRequests => {
                 const reqExists = prevRequests.some(r => r.tripId === req.tripId);
