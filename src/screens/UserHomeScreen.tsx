@@ -343,6 +343,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                     longitude: loc.coords.longitude,
                     heading: loc.coords.heading || 0,
                 });
+                // Pre-set pickup coords so getPrice never sees a null origin
+                setPickupCoords({
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude,
+                });
                 getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
 
             } catch (error) {
@@ -392,20 +397,54 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
     const getAddressFromCoords = async (lat: number, lng: number, isPickup: boolean) => {
         try {
-            const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_APIKEY}`);
+            const res = await fetch(
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=es&key=${GOOGLE_MAPS_APIKEY}`
+            );
             const data = await res.json();
-            if (data.results[0]) {
-                const addr = data.results[0].formatted_address;
 
-                if (isPickup) {
-                    pickupSearchRef.current?.setAddressText(addr);
-                    setPickupAddress(addr);
-                } else {
-                    destinationSearchRef.current?.setAddressText(addr);
-                    setDestinationAddress(addr);
-                }
+            // Skip results whose type is 'plus_code' — those are the cryptic codes like "7Q2J+3Q"
+            const bestResult = (data.results as any[])?.find(
+                (r: any) => !(r.types as string[])?.includes('plus_code')
+            ) ?? data.results?.[0];
+
+            if (!bestResult) return;
+
+            // Build a human-readable address from components (avoids Plus Codes & postal codes)
+            const components: any[] = bestResult.address_components ?? [];
+            const get = (type: string): string =>
+                components.find((c: any) => (c.types as string[]).includes(type))?.long_name ?? '';
+
+            const streetNumber = get('street_number');
+            const route        = get('route');
+            const neighborhood = get('neighborhood') || get('sublocality_level_1') || get('sublocality');
+            const city         = get('locality') || get('administrative_area_level_2');
+
+            let addr = '';
+            if (route) {
+                addr = streetNumber ? `${route} ${streetNumber}` : route;
+                if (neighborhood) addr += `, ${neighborhood}`;
+            } else if (neighborhood) {
+                addr = city ? `${neighborhood}, ${city}` : neighborhood;
+            } else {
+                // Last resort: strip Plus Codes (XXXX+XX) and postal codes from formatted_address
+                addr = (bestResult.formatted_address as string)
+                    .replace(/\b[A-Z0-9]{4,}\+[A-Z0-9]{2,}\b\s*/g, '')  // Plus Code
+                    .replace(/\b\d{4,6}\b/g, '')                          // Postal code
+                    .replace(/,\s*,/g, ',')
+                    .replace(/^[,\s]+|[,\s]+$/g, '')
+                    .trim();
             }
-        } catch (e) { console.error(e); }
+
+            if (isPickup) {
+                pickupSearchRef.current?.setAddressText(addr);
+                setPickupAddress(addr);
+            } else {
+                destinationSearchRef.current?.setAddressText(addr);
+                setDestinationAddress(addr);
+            }
+        } catch (e) {
+            console.error('[Geocoding] Error:', e);
+        }
     };
 
     const moveToLocation = (details: any, isPickup: boolean) => {
@@ -436,12 +475,16 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     const centerOnUserLocation = async () => {
         try {
             const loc = await Location.getCurrentPositionAsync({});
+            const { latitude, longitude } = loc.coords;
             mapRef.current?.animateToRegion({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude,
+                latitude,
+                longitude,
                 latitudeDelta: 0.005,
                 longitudeDelta: 0.005,
             }, 1000);
+            // Actualizar recogida con la ubicación real del usuario
+            setPickupCoords({ latitude, longitude });
+            getAddressFromCoords(latitude, longitude, true);
         } catch (e) {
             console.warn("Could not get user location", e);
         }
@@ -847,27 +890,34 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                 ref={pickupSearchRef}
                                 placeholder="¿Dónde te recogemos?"
                                 fetchDetails={true}
+                                minLength={2}
+                                debounce={400}
                                 onPress={(data, details) => {
                                     if (!details) return;
                                     setPickupAddress(data.description || details.formatted_address || '');
                                     moveToLocation(details, true);
                                 }}
-                                query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                                onFail={(error) => console.warn('[Places pickup] onFail:', error)}
+                                onNotFound={() => console.log('[Places pickup] sin resultados')}
+                                query={{
+                                    key: GOOGLE_MAPS_APIKEY,
+                                    language: 'es',
+                                    components: 'country:ec',
+                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca
+                                    radius: '30000',                    // 30 km — sesga hacia Cuenca sin excluir el resto
+                                }}
                                 styles={{
-                                    container: { flex: 0, width: '100%', zIndex: 2 },
+                                    container: { flex: 0, width: '100%', zIndex: 20 },
                                     listView: {
                                         backgroundColor: 'white',
                                         borderRadius: 10,
-                                        elevation: 8,
+                                        elevation: 10,
                                         shadowColor: '#000',
                                         shadowOffset: { width: 0, height: 2 },
                                         shadowOpacity: 0.15,
                                         shadowRadius: 4,
-                                        position: 'absolute',
-                                        top: 46,
-                                        left: 0,
-                                        right: 0,
-                                        zIndex: 9999,
+                                        maxHeight: 200,
+                                        zIndex: 20,
                                     },
                                     textInput: styles.searchInput,
                                     row: { padding: 13, height: 44, flexDirection: 'row' },
@@ -894,27 +944,34 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                 ref={destinationSearchRef}
                                 placeholder="¿A dónde vas?"
                                 fetchDetails={true}
+                                minLength={2}
+                                debounce={400}
                                 onPress={(data, details) => {
                                     if (!details) return;
                                     setDestinationAddress(data.description || details.formatted_address || '');
                                     moveToLocation(details, false);
                                 }}
-                                query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                                onFail={(error) => console.warn('[Places destino] onFail:', error)}
+                                onNotFound={() => console.log('[Places destino] sin resultados')}
+                                query={{
+                                    key: GOOGLE_MAPS_APIKEY,
+                                    language: 'es',
+                                    components: 'country:ec',
+                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca
+                                    radius: '30000',                    // 30 km — sesga hacia Cuenca sin excluir el resto
+                                }}
                                 styles={{
-                                    container: { flex: 0, width: '100%', zIndex: 1 },
+                                    container: { flex: 0, width: '100%', zIndex: 10 },
                                     listView: {
                                         backgroundColor: 'white',
                                         borderRadius: 10,
-                                        elevation: 8,
+                                        elevation: 10,
                                         shadowColor: '#000',
                                         shadowOffset: { width: 0, height: 2 },
                                         shadowOpacity: 0.15,
                                         shadowRadius: 4,
-                                        position: 'absolute',
-                                        top: 46,
-                                        left: 0,
-                                        right: 0,
-                                        zIndex: 9998,
+                                        maxHeight: 200,
+                                        zIndex: 10,
                                     },
                                     textInput: styles.searchInput,
                                     row: { padding: 13, height: 44, flexDirection: 'row' },
