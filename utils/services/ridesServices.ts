@@ -84,6 +84,19 @@ export async function getPriceApi(originLat: number, originLng: number, destLat:
     }
 }
 
+export async function driverCancelRideApi(rideId: string) {
+    const token = await AsyncStorage.getItem('authToken');
+    const response = await fetch(endPoint.driverCancelRide + `/${rideId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) throw new Error('DRIVER CANCEL ERROR');
+    return response.json();
+}
+
 export async function cancelSolicitudApi(id: string) {
     try {
         const token = await AsyncStorage.getItem('authToken');

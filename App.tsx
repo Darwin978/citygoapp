@@ -42,8 +42,8 @@ import notifee, {
 // correcta de "actualizar" un canal es subir la versión del ID y eliminar el
 // anterior. setupNotifeeChannels() se encarga de esa migración automáticamente.
 // ──────────────────────────────────────────────────────────────────────────────
-const RIDE_CHANNEL_ID   = 'rides-critical-v3';   // ← sube aquí cuando necesites cambiar propiedades
-const MSG_CHANNEL_ID    = 'messages-channel';
+const RIDE_CHANNEL_ID = 'rides-critical-v3';   // ← sube aquí cuando necesites cambiar propiedades
+const MSG_CHANNEL_ID = 'messages-channel';
 const STATUS_CHANNEL_ID = 'status-channel';
 const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
 
@@ -84,13 +84,13 @@ if (Platform.OS === 'android') {
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const channelId = (notification.request.trigger as any)?.channelId ?? '';
-    const isRide    = channelId === RIDE_CHANNEL_ID;
+    const isRide = channelId === RIDE_CHANNEL_ID;
     return {
-      shouldShowAlert:  true,
-      shouldPlaySound:  true,
-      shouldSetBadge:   false,
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
       shouldShowBanner: true,
-      shouldShowList:   true,
+      shouldShowList: true,
       priority: isRide
         ? Notifications.AndroidNotificationPriority.MAX
         : Notifications.AndroidNotificationPriority.DEFAULT,
@@ -117,7 +117,7 @@ async function setupNotifeeChannels() {
   // NotificationManager de Android, así que una llamada de deleteChannel
   // borra el canal del sistema para ambas librerías.
   for (const oldId of DEPRECATED_CHANNEL_IDS) {
-    await notifee.deleteChannel(oldId).catch(() => {/* ya no existía, ignorar */});
+    await notifee.deleteChannel(oldId).catch(() => {/* ya no existía, ignorar */ });
   }
 
   // ── Canal de carreras (solo @notifee gestiona este canal) ─────────────────
@@ -245,13 +245,29 @@ async function registerForPushNotificationsAsync(shouldRequest = true) {
     );
     if (!hasPermission) {
       if (shouldRequest) {
+        // Rationale previa obligatoria antes del diálogo del sistema (política Google Play)
+        await new Promise<void>((resolve) => {
+          Alert.alert(
+            'Notificaciones de CityGo',
+            'Necesitamos enviarte notificaciones para:\n\n' +
+            '• Avisarte cuando un conductor acepte tu viaje\n' +
+            '• Informarte cuando el conductor haya llegado\n' +
+            '• Recibir solicitudes de nuevas carreras (conductores)\n' +
+            '• Mensajes del chat durante el viaje\n\n' +
+            'Puedes desactivarlas en cualquier momento desde Ajustes.',
+            [{ text: 'Continuar', onPress: () => resolve() }],
+            { cancelable: false }
+          );
+        });
+
         const result = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
         );
         if (result !== PermissionsAndroid.RESULTS.GRANTED) {
           Alert.alert(
             'Notificaciones desactivadas',
-            'Activa las notificaciones para recibir nuevas carreras.'
+            'Sin notificaciones no podrás recibir alertas de carreras ni mensajes. ' +
+            'Actívalas en Ajustes → Apps → CityGo → Notificaciones.'
           );
           return;
         }
@@ -309,11 +325,11 @@ async function openRideFromNotification(remoteMessage?: any) {
 messaging().setBackgroundMessageHandler(async remoteMessage => {
   console.log('[FCM-BG] Mensaje recibido en background/killed:', remoteMessage);
 
-  const data   = remoteMessage?.data ?? {};
-  const type   = (data.type   as string) ?? 'STATUS';
+  const data = remoteMessage?.data ?? {};
+  const type = (data.type as string) ?? 'STATUS';
   const rideId = (data.rideId as string) ?? (data.tripId as string) ?? '';
-  const title  = (data.title  as string) ?? 'CityGo';
-  const body   = (data.body   as string) ?? '';
+  const title = (data.title as string) ?? 'CityGo';
+  const body = (data.body as string) ?? '';
 
   // Almacenar el rideId para que restoreSession lo encuentre al abrir la app
   if (rideId) {
@@ -356,10 +372,10 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
 export function HomeNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login"    component={LoginScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
-      <Stack.Screen name="Pending"  component={PendingApprovalScreen} />
-      <Stack.Screen name="Map"      component={HomeScreen} />
+      <Stack.Screen name="Pending" component={PendingApprovalScreen} />
+      <Stack.Screen name="Map" component={HomeScreen} />
     </Stack.Navigator>
   );
 }
@@ -367,9 +383,9 @@ export function HomeNavigator() {
 function WithoutLogin() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login"    component={LoginScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
-      <Stack.Screen name="Pending"  component={PendingApprovalScreen} />
+      <Stack.Screen name="Pending" component={PendingApprovalScreen} />
     </Stack.Navigator>
   );
 }
@@ -388,7 +404,7 @@ function RootNavigator() {
     requestBatteryAndMiuiPermissions,
   } = usePermissions();
 
-  const [showSplash, setShowSplash]             = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
   const [permissionsSettled, setPermissionsSettled] = useState(false);
 
   // ── Ocultar splash ──────────────────────────────────────────────────────
@@ -411,9 +427,9 @@ function RootNavigator() {
     const unsubscribe = messaging().onMessage(async remoteMessage => {
       console.log('[FCM-FG] Mensaje en foreground:', remoteMessage);
       const fgData = remoteMessage?.data ?? {};
-      const type   = (fgData.type   as string) ?? 'STATUS';
-      const title  = (fgData.title  as string) ?? 'CityGo';
-      const body   = (fgData.body   as string) ?? '';
+      const type = (fgData.type as string) ?? 'STATUS';
+      const title = (fgData.title as string) ?? 'CityGo';
+      const body = (fgData.body as string) ?? '';
       const rideId = (fgData.rideId as string) ?? '';
 
       if (type === 'NEW_RIDE' || type === 'ARRIVED') {

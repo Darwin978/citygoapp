@@ -214,6 +214,26 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
             });
 
+            socket.current.on('ride_cancelled_by_driver', async () => {
+                await AsyncStorage.removeItem('activeRideId');
+                setCurrentRideId(null);
+                setActiveRideBackendStatus(null);
+                setDriverInfo(null);
+                setPickupCoords(null);
+                setDestinationCoords(null);
+                setRouteDetails(null);
+                setPickupAddress('');
+                setDestinationAddress('');
+                pickupSearchRef.current?.setAddressText('');
+                destinationSearchRef.current?.setAddressText('');
+                setStatus('PICKUP');
+                centerOnUserLocation();
+                showAlert(
+                    "Carrera cancelada",
+                    "El conductor ha cancelado la carrera. Puedes solicitar un nuevo viaje."
+                );
+            });
+
             socket.current.on('ride_finished', async (data: any) => {
                 // Guardamos el estado para calificar, pero limpiamos el mapa
                 setPickupCoords(null);
@@ -323,32 +343,30 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     useEffect(() => {
         (async () => {
             try {
-                console.log("Ingresa a obtener ubicacion");
                 const savedRole = await AsyncStorage.getItem('role');
-                console.log("ROL", savedRole);
                 setRole(savedRole);
+
                 let { status } = await Location.requestForegroundPermissionsAsync();
-                console.log("status", status);
                 if (status !== 'granted') return;
-                let loc = await Location.getCurrentPositionAsync({});
-                console.log("posicion actual ", loc);
-                setRegion({
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                });
-                setMyLocation({
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    heading: loc.coords.heading || 0,
-                });
-                // Pre-set pickup coords so getPrice never sees a null origin
-                setPickupCoords({
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                });
-                getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
+
+                const applyLocation = (loc: Location.LocationObject) => {
+                    const { latitude, longitude, heading } = loc.coords;
+                    setRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+                    setMyLocation({ latitude, longitude, heading: heading || 0 });
+                    setPickupCoords({ latitude, longitude });
+                    getAddressFromCoords(latitude, longitude, true);
+                };
+
+                // 1. Posición cacheada: instantánea, muestra el mapa de inmediato
+                const last = await Location.getLastKnownPositionAsync({ maxAge: 60_000 });
+                if (last) applyLocation(last);
+
+                // 2. Posición precisa en segundo plano: actualiza sin bloquear
+                Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.Balanced,
+                }).then(loc => {
+                    applyLocation(loc);
+                }).catch(() => { /* GPS no disponible, la posición cacheada es suficiente */ });
 
             } catch (error) {
                 console.log("Error al obtener ubicacion", error);
@@ -879,8 +897,10 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             )}
 
             {/* Buscadores Flotantes */}
+            {/* Cuando el conductor está en modo offline, el switch ocupa ~60 px arriba,
+                por eso desplazamos el buscador hacia abajo para que no se solapen. */}
             {!isOnline && status !== 'ROUTE' && status !== 'ON_RIDE' && status !== 'TO_DESTINO' && status !== 'SEARCHING' && (
-                <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
+                <View style={[styles.searchContainer, { top: isDriverOffline ? insets.top + 76 : insets.top + 10 }]}>
 
                     {/* Pickup */}
                     <View style={styles.searchRow}>

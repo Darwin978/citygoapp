@@ -12,6 +12,7 @@ export const endPoint = {
     activeRide: `${BACKEND_URL}/ride/me/active`,
     getPrice: `${BACKEND_URL}/ride/price`,
     cancelSolicitud: `${BACKEND_URL}/ride/cancel-solicitud`,
+    driverCancelRide: `${BACKEND_URL}/ride/driver-cancel`,
     addVehicle: `${BACKEND_URL}/vehicles`,
     getUserVehicles: `${BACKEND_URL}/vehicles/driver`,
     setActiveVehicle: `${BACKEND_URL}/driver/activeVehicle`,

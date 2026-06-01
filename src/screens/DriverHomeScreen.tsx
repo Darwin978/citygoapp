@@ -12,12 +12,13 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, driverCancelRideApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import MapZoomControls from '../components/MapZoomControls';
 import { updateStatusDriverApi } from '../../utils/services/userService';
 import ChatModal from '../components/ChatModal';
 import { isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToDriverScreen } from '../../utils/services/rideFlow';
 import { useCustomAlert } from '../../utils/context/AlertContext';
+import notifee, { EventType } from '@notifee/react-native';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
@@ -256,10 +257,19 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     }
                 });
 
-                setPendingRequest({
+                const fullPendingRequest = {
                     tripId: activeRideId,
                     clientName: response.rideData?.clientName || 'Pasajero',
-                });
+                    originAddress: response.rideData?.originAddress || '',
+                    destinationAddress: response.rideData?.destAddress || '',
+                    price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                    distance: response.rideData?.distance || '',
+                };
+                setPendingRequest(fullPendingRequest);
+                // Si la carrera aún no fue aceptada, mostrar el diálogo para que el conductor pueda aceptarla
+                if (response.status === 'REQUESTED') {
+                    setShowRequestDialog(true);
+                }
                 socket.current?.emit('joinRide', activeRideId);
                 setOtpValidate(isTripInProgress(response.status));
                 setStatus(mapBackendStatusToDriverScreen(response.status) as any);
@@ -287,10 +297,18 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             }
                         });
 
-                        setPendingRequest({
+                        const fullPendingRequestFallback = {
                             tripId: savedRideId,
                             clientName: response.rideData?.clientName || 'Pasajero',
-                        });
+                            originAddress: response.rideData?.originAddress || '',
+                            destinationAddress: response.rideData?.destAddress || '',
+                            price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                            distance: response.rideData?.distance || '',
+                        };
+                        setPendingRequest(fullPendingRequestFallback);
+                        if (response.status === 'REQUESTED') {
+                            setShowRequestDialog(true);
+                        }
                         socket.current.emit('joinRide', savedRideId);
                         setOtpValidate(isTripInProgress(response.status));
                         setStatus(mapBackendStatusToDriverScreen(response.status) as any);
@@ -301,34 +319,97 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         restoreSession();
     }, [userId])
 
+    // ── Handler notifee en FOREGROUND ────────────────────────────────────────
+    // Cuando el conductor toca una notificación de nueva carrera mientras la app
+    // está abierta, re-verificamos si hay una carrera REQUESTED pendiente.
+    useEffect(() => {
+        const unsubscribe = notifee.onForegroundEvent(async ({ type, detail }) => {
+            if (type !== EventType.PRESS && type !== EventType.ACTION_PRESS) return;
+            const notifType = detail.notification?.data?.type as string | undefined;
+            const rideId = detail.notification?.data?.rideId as string | undefined;
+            if ((notifType === 'NEW_RIDE') && rideId) {
+                await AsyncStorage.setItem('activeRideId', rideId);
+                // Re-consultar el estado de la carrera para mostrar el diálogo
+                try {
+                    const response = await getActiveRideApi();
+                    if (response?.status === 'REQUESTED' && response?.rideData) {
+                        const req = {
+                            tripId: response.rideData.tripId || rideId,
+                            clientName: response.rideData?.clientName || 'Pasajero',
+                            originAddress: response.rideData?.originAddress || '',
+                            destinationAddress: response.rideData?.destAddress || '',
+                            price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                            distance: response.rideData?.distance || '',
+                        };
+                        setPendingRequest(req);
+                        setShowRequestDialog(true);
+                    }
+                } catch (_e) { /* silenciar — el diálogo simplemente no abre */ }
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // ── Deep link en vivo: citygo://ride/{rideId} ─────────────────────────────
+    // Cuando el sistema abre la app (o la trae al frente) con este URL mientras
+    // ya está montada, revisamos si la carrera está en estado REQUESTED.
+    useEffect(() => {
+        const handleUrl = async ({ url }: { url: string }) => {
+            if (!url.startsWith('citygo://ride/')) return;
+            const rideId = url.replace('citygo://ride/', '');
+            if (!rideId) return;
+            await AsyncStorage.setItem('activeRideId', rideId);
+            try {
+                const response = await getActiveRideApi();
+                if (response?.status === 'REQUESTED' && response?.rideData) {
+                    const req = {
+                        tripId: response.rideData.tripId || rideId,
+                        clientName: response.rideData?.clientName || 'Pasajero',
+                        originAddress: response.rideData?.originAddress || '',
+                        destinationAddress: response.rideData?.destAddress || '',
+                        price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                        distance: response.rideData?.distance || '',
+                    };
+                    setPendingRequest(req);
+                    setShowRequestDialog(true);
+                }
+            } catch (_e) { /* silenciar */ }
+        };
+
+        const subscription = Linking.addEventListener('url', handleUrl);
+        return () => subscription.remove();
+    }, []);
+
     // 2. Obtener ubicación inicial y Rol
     useEffect(() => {
         (async () => {
             try {
-                console.log("Ingresa a obtener ubicacion");
                 const savedRole = await AsyncStorage.getItem('role');
-                console.log("ROL", savedRole);
                 setRole(savedRole);
                 if (savedRole === Roles.DRIVER) {
                     handleChangeStatusDriver(true);
                 }
+
                 let { status } = await Location.requestForegroundPermissionsAsync();
-                console.log("status", status);
                 if (status !== 'granted') return;
-                let loc = await Location.getCurrentPositionAsync({});
-                console.log("posicion actual ", loc);
-                setRegion({
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                });
-                setMyLocation({
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    heading: loc.coords.heading || 0,
-                });
-                getAddressFromCoords(loc.coords.latitude, loc.coords.longitude, true);
+
+                const applyLocation = (loc: Location.LocationObject) => {
+                    const { latitude, longitude, heading } = loc.coords;
+                    setRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+                    setMyLocation({ latitude, longitude, heading: heading || 0 });
+                    getAddressFromCoords(latitude, longitude, true);
+                };
+
+                // 1. Posición cacheada: instantánea, muestra el mapa de inmediato
+                const last = await Location.getLastKnownPositionAsync({ maxAge: 60_000 });
+                if (last) applyLocation(last);
+
+                // 2. Posición precisa en segundo plano: actualiza sin bloquear
+                Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.Balanced,
+                }).then(loc => {
+                    applyLocation(loc);
+                }).catch(() => { /* GPS no disponible, la posición cacheada es suficiente */ });
 
             } catch (error) {
                 console.log("Error al obtener ubicacion", error);
@@ -674,6 +755,37 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         setOtpValidate(false);
                         setInitialChatMessages([]);
                         AsyncStorage.removeItem('activeRideId');
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDriverCancelRide = () => {
+        showAlert(
+            "Cancelar carrera",
+            "¿Estás seguro de que deseas cancelar esta carrera? El pasajero será notificado.",
+            [
+                { text: "No, continuar", style: "cancel" },
+                {
+                    text: "Sí, cancelar", style: "destructive", onPress: async () => {
+                        if (!currentRideId) return;
+                        try {
+                            await driverCancelRideApi(currentRideId);
+                        } catch (e) {
+                            // El backend puede fallar si el estado cambió; seguimos limpiando la UI
+                            console.warn('[CancelRide] Error en API:', e);
+                        }
+                        setStatus('PICKUP');
+                        setCurrentRideId(null);
+                        setActiveRideBackendStatus(null);
+                        setActiveRequestRide(null);
+                        setPendingRequest(null);
+                        setOtpValidate(false);
+                        setShowRequestDialog(false);
+                        setInitialChatMessages([]);
+                        await AsyncStorage.removeItem('activeRideId');
+                        showAlert("Carrera cancelada", "Ya puedes recibir nuevas solicitudes.");
                     }
                 }
             ]
@@ -1108,6 +1220,14 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
                         </TouchableOpacity>
                         )}
+
+                        <TouchableOpacity
+                            style={[styles.btnCancelSearch, { marginTop: 8, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                            onPress={handleDriverCancelRide}
+                        >
+                            <Ionicons name="close-circle-outline" size={18} color="#EF4444" />
+                            <Text style={[styles.btnCancelSearchText, { color: '#EF4444' }]}>CANCELAR CARRERA</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             )}
@@ -1150,6 +1270,14 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
                         </TouchableOpacity>
                         )}
+
+                        <TouchableOpacity
+                            style={[styles.btnCancelSearch, { marginTop: 8, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                            onPress={handleDriverCancelRide}
+                        >
+                            <Ionicons name="close-circle-outline" size={18} color="#EF4444" />
+                            <Text style={[styles.btnCancelSearchText, { color: '#EF4444' }]}>CANCELAR CARRERA</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             )}

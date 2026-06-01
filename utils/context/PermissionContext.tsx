@@ -53,10 +53,36 @@ export const PermissionProvider = ({ children }: any) => {
   };
 
   const requestPermissions = async () => {
+    // Google Play exige mostrar al usuario POR QUÉ se necesita el permiso
+    // antes de lanzar el diálogo del sistema (rationale previo).
+    const existing = await Location.getForegroundPermissionsAsync();
+    if (existing.status !== "granted") {
+      await new Promise<void>((resolve) => {
+        Alert.alert(
+          "Permiso de ubicación",
+          "CityGo necesita acceder a tu ubicación para:\n\n" +
+          "• Mostrarte en el mapa y calcular rutas\n" +
+          "• Conectarte con conductores cercanos\n" +
+          "• Estimar tiempos y precios de viaje\n\n" +
+          "Tu ubicación se usa mientras la app está abierta o en segundo plano.",
+          [
+            {
+              text: "Continuar",
+              onPress: () => resolve(),
+            },
+          ],
+          { cancelable: false }
+        );
+      });
+    }
+
     const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
 
     if (locStatus !== "granted") {
-      Alert.alert("Permisos necesarios", "Esta aplicación necesita acceso a la ubicación para funcionar.");
+      Alert.alert(
+        "Ubicación requerida",
+        "CityGo no puede funcionar sin acceso a tu ubicación. Actívala en Ajustes → Aplicaciones → CityGo → Permisos."
+      );
       setLocationGranted(false);
       return;
     }
@@ -86,12 +112,28 @@ export const PermissionProvider = ({ children }: any) => {
       return;
     }
 
+    // ── Divulgación destacada en la aplicación (PIAD) ────────────────────────
+    // Google Play exige que antes de solicitar ACCESS_BACKGROUND_LOCATION la app
+    // muestre una divulgación clara que mencione EXPLÍCITAMENTE:
+    //   • qué dato se recoge (ubicación)
+    //   • que ocurre INCLUSO CUANDO LA APP ESTÁ CERRADA O NO ESTÁ EN USO
+    //   • para qué se usa y con quién se comparte
+    // Este Alert cumple ese requisito; NO está incrustado en política de privacidad.
+    // ─────────────────────────────────────────────────────────────────────────
     await new Promise<void>((resolve) => {
       Alert.alert(
         "Ubicación en segundo plano",
-        Platform.OS === "android"
-          ? "Para recibir carreras incluso con la pantalla apagada, selecciona \"Permitir todo el tiempo\" en la siguiente pantalla."
-          : "Para rastrear tu posición mientras la app está en segundo plano, selecciona \"Siempre\" en la siguiente pantalla.",
+        "CityGo accede a tu ubicación de forma continua mientras tienes un viaje activo, " +
+        "incluso cuando la aplicación está cerrada o no está en uso.\n\n" +
+        "¿Para qué se usa?\n" +
+        "• Para que los pasajeros vean tu posición en tiempo real\n" +
+        "• Para calcular la ruta y el tiempo de llegada\n" +
+        "• Para registrar el recorrido del viaje\n\n" +
+        "Tu ubicación solo se comparte con el pasajero asignado a tu viaje activo " +
+        "y deja de enviarse en cuanto el viaje finaliza.\n\n" +
+        (Platform.OS === "android"
+          ? "Selecciona \"Permitir todo el tiempo\" en la siguiente pantalla para activarlo."
+          : "Selecciona \"Siempre\" en la siguiente pantalla para activarlo."),
         [
           {
             text: "Ahora no",
@@ -99,14 +141,15 @@ export const PermissionProvider = ({ children }: any) => {
             onPress: () => resolve(),
           },
           {
-            text: "Configurar",
+            text: "Entendido, configurar",
             onPress: async () => {
               const { status } = await Location.requestBackgroundPermissionsAsync();
               setBackgroundLocationGranted(status === "granted");
               resolve();
             },
           },
-        ]
+        ],
+        { cancelable: false }
       );
     });
   };
@@ -140,7 +183,7 @@ export const PermissionProvider = ({ children }: any) => {
 
     // Detectar Xiaomi / Redmi / POCO (todos usan MIUI o HyperOS)
     const constants = (Platform as any).constants ?? {};
-    const brand        = (constants.Brand        ?? "").toLowerCase();
+    const brand = (constants.Brand ?? "").toLowerCase();
     const manufacturer = (constants.Manufacturer ?? "").toLowerCase();
     const isMiui = ["xiaomi", "redmi", "poco"].some(
       b => brand.includes(b) || manufacturer.includes(b)

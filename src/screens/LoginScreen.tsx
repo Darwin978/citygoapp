@@ -105,9 +105,9 @@ export default function LoginScreen({ navigation }: any) {
             />
           </View>
 
-          <TouchableOpacity style={styles.forgotBtn}>
+          {/*<TouchableOpacity style={styles.forgotBtn}>
             <Text style={styles.forgotText}>¿Olvidaste tu contraseña?</Text>
-          </TouchableOpacity>
+          </TouchableOpacity>*/}
 
           <TouchableOpacity disabled={loading} style={styles.loginBtn} onPress={handleLogin}>
             <Text style={styles.loginBtnText}>{loading ? "Iniciando sesión..." : "Entrar"}</Text>
