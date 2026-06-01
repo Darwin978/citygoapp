@@ -12,7 +12,7 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { cancelSolicitudApi, driverCancelRideApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, driverCancelRideApi, getActiveRideApi, getRideByIdApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import MapZoomControls from '../components/MapZoomControls';
 import { updateStatusDriverApi } from '../../utils/services/userService';
 import ChatModal from '../components/ChatModal';
@@ -231,11 +231,80 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
 
     useEffect(() => {
         const restoreSession = async () => {
-            console.log("Ingresa a restoreSession");
+            // ── Leer contexto guardado por la notificación ───────────────────
+            const savedRideId   = await AsyncStorage.getItem('activeRideId');
+            const notifType     = await AsyncStorage.getItem('pendingNotifType');
+            await AsyncStorage.removeItem('pendingNotifType'); // consumir una sola vez
+
+            // ── Caso 0: notificación de MENSAJE → abrir chat si la carrera sigue activa ─
+            if (notifType === 'MESSAGE' && savedRideId) {
+                try {
+                    const response = await getRideByIdApi(savedRideId);
+                    if (response?.rideData && isChatEnabledRideStatus(response.status)) {
+                        // Restaurar suficiente estado para que ChatModal funcione
+                        setCurrentRideId(savedRideId);
+                        setActiveRideBackendStatus(response.status);
+                        setInitialChatMessages(response.rideData.messages || []);
+                        setPendingRequest({
+                            tripId: savedRideId,
+                            clientName: response.rideData?.clientName || 'Pasajero',
+                            originAddress: response.rideData?.originAddress || '',
+                            destinationAddress: response.rideData?.destAddress || '',
+                            price: response.rideData?.finalPrice ?? 0,
+                            distance: response.rideData?.distance || '',
+                        });
+                        setActiveRequestRide({
+                            ...response,
+                            ride: {
+                                originLat: response.rideData.pickupCoords.lat,
+                                originLng: response.rideData.pickupCoords.lng,
+                                destLat: response.rideData.destCoords.lat,
+                                destLng: response.rideData.destCoords.lng,
+                                originAddress: response.rideData.originAddress,
+                                destinationAddress: response.rideData.destAddress,
+                            }
+                        });
+                        setOtpValidate(isTripInProgress(response.status));
+                        setStatus(mapBackendStatusToDriverScreen(response.status) as any);
+                        socket.current?.emit('joinRide', savedRideId);
+                        setIsChatVisible(true); // ← abrir chat directamente
+                    }
+                } catch (_e) { /* silenciar */ }
+                return;
+            }
+
+            // ── Caso 1: el conductor abrió el app tocando una notif NEW_RIDE ─
+            // La carrera está en REQUESTED → el conductor NO está asignado aún,
+            // por eso getActiveRideApi() devuelve IDLE y no sirve aquí.
+            // Usamos getRideByIdApi(rideId) que obtiene la carrera por ID directo.
+            if (notifType === 'NEW_RIDE' && savedRideId) {
+                try {
+                    const response = await getRideByIdApi(savedRideId);
+                    if (response?.status === 'REQUESTED' && response?.rideData) {
+                        const req = {
+                            tripId: savedRideId,
+                            clientName: response.rideData?.clientName || 'Pasajero',
+                            originAddress: response.rideData?.originAddress || '',
+                            destinationAddress: response.rideData?.destAddress || '',
+                            price: response.rideData?.finalPrice ?? 0,
+                            distance: response.rideData?.distance || '',
+                        };
+                        setPendingRequest(req);
+                        setShowRequestDialog(true);
+                        return; // no seguir con la restauración de viaje activo
+                    }
+                    // Si ya fue aceptada por otro conductor, limpiar y salir
+                    await AsyncStorage.removeItem('activeRideId');
+                } catch (e) {
+                    console.log('[restoreSession] Error al obtener carrera por ID:', e);
+                }
+                return;
+            }
+
+            // ── Caso 2: restaurar un viaje activo (ACCEPTED, IN_PROGRESS…) ──
             try {
                 const response = await getActiveRideApi();
-                console.log("response getActiveRideApi", response);
-                if (!response || !response.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
+                if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
                     await AsyncStorage.removeItem('activeRideId');
                     return;
                 }
@@ -256,33 +325,25 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         destinationAddress: response.rideData.destAddress,
                     }
                 });
-
-                const fullPendingRequest = {
+                setPendingRequest({
                     tripId: activeRideId,
                     clientName: response.rideData?.clientName || 'Pasajero',
                     originAddress: response.rideData?.originAddress || '',
                     destinationAddress: response.rideData?.destAddress || '',
-                    price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                    price: response.rideData?.finalPrice ?? 0,
                     distance: response.rideData?.distance || '',
-                };
-                setPendingRequest(fullPendingRequest);
-                // Si la carrera aún no fue aceptada, mostrar el diálogo para que el conductor pueda aceptarla
-                if (response.status === 'REQUESTED') {
-                    setShowRequestDialog(true);
-                }
+                });
                 socket.current?.emit('joinRide', activeRideId);
                 setOtpValidate(isTripInProgress(response.status));
                 setStatus(mapBackendStatusToDriverScreen(response.status) as any);
             } catch (error) {
-                console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
-                const savedRideId = await AsyncStorage.getItem('activeRideId');
+                // Fallback vía socket si el REST falla
                 if (savedRideId && socket.current) {
                     socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
-                        if (!response || !response.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
+                        if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
                             AsyncStorage.removeItem('activeRideId');
                             return;
                         }
-
                         await AsyncStorage.setItem('activeRideId', savedRideId);
                         setCurrentRideId(savedRideId);
                         setActiveRideBackendStatus(response.status);
@@ -294,21 +355,18 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                                 originLng: response.rideData.pickupCoords.lng,
                                 destLat: response.rideData.destCoords.lat,
                                 destLng: response.rideData.destCoords.lng,
+                                originAddress: response.rideData.originAddress,
+                                destinationAddress: response.rideData.destAddress,
                             }
                         });
-
-                        const fullPendingRequestFallback = {
+                        setPendingRequest({
                             tripId: savedRideId,
                             clientName: response.rideData?.clientName || 'Pasajero',
                             originAddress: response.rideData?.originAddress || '',
                             destinationAddress: response.rideData?.destAddress || '',
-                            price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                            price: response.rideData?.finalPrice ?? 0,
                             distance: response.rideData?.distance || '',
-                        };
-                        setPendingRequest(fullPendingRequestFallback);
-                        if (response.status === 'REQUESTED') {
-                            setShowRequestDialog(true);
-                        }
+                        });
                         socket.current.emit('joinRide', savedRideId);
                         setOtpValidate(isTripInProgress(response.status));
                         setStatus(mapBackendStatusToDriverScreen(response.status) as any);
@@ -331,14 +389,15 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 await AsyncStorage.setItem('activeRideId', rideId);
                 // Re-consultar el estado de la carrera para mostrar el diálogo
                 try {
-                    const response = await getActiveRideApi();
+                    // Usar getRideByIdApi: funciona aunque el conductor no esté asignado aún
+                    const response = await getRideByIdApi(rideId);
                     if (response?.status === 'REQUESTED' && response?.rideData) {
                         const req = {
-                            tripId: response.rideData.tripId || rideId,
+                            tripId: rideId,
                             clientName: response.rideData?.clientName || 'Pasajero',
                             originAddress: response.rideData?.originAddress || '',
                             destinationAddress: response.rideData?.destAddress || '',
-                            price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                            price: response.rideData?.finalPrice ?? 0,
                             distance: response.rideData?.distance || '',
                         };
                         setPendingRequest(req);
@@ -351,26 +410,37 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     }, []);
 
     // ── Deep link en vivo: citygo://ride/{rideId} ─────────────────────────────
-    // Cuando el sistema abre la app (o la trae al frente) con este URL mientras
-    // ya está montada, revisamos si la carrera está en estado REQUESTED.
     useEffect(() => {
         const handleUrl = async ({ url }: { url: string }) => {
             if (!url.startsWith('citygo://ride/')) return;
             const rideId = url.replace('citygo://ride/', '');
             if (!rideId) return;
             await AsyncStorage.setItem('activeRideId', rideId);
+
+            const notifType = await AsyncStorage.getItem('pendingNotifType');
+            await AsyncStorage.removeItem('pendingNotifType');
+
             try {
-                const response = await getActiveRideApi();
-                if (response?.status === 'REQUESTED' && response?.rideData) {
-                    const req = {
-                        tripId: response.rideData.tripId || rideId,
+                const response = await getRideByIdApi(rideId);
+                if (!response?.rideData) return;
+
+                if (notifType === 'MESSAGE' && isChatEnabledRideStatus(response.status)) {
+                    setCurrentRideId(rideId);
+                    setActiveRideBackendStatus(response.status);
+                    setInitialChatMessages(response.rideData.messages || []);
+                    setIsChatVisible(true);
+                    return;
+                }
+
+                if (response.status === 'REQUESTED') {
+                    setPendingRequest({
+                        tripId: rideId,
                         clientName: response.rideData?.clientName || 'Pasajero',
                         originAddress: response.rideData?.originAddress || '',
                         destinationAddress: response.rideData?.destAddress || '',
-                        price: response.rideData?.finalPrice ?? response.rideData?.price ?? 0,
+                        price: response.rideData?.finalPrice ?? 0,
                         distance: response.rideData?.distance || '',
-                    };
-                    setPendingRequest(req);
+                    });
                     setShowRequestDialog(true);
                 }
             } catch (_e) { /* silenciar */ }

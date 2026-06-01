@@ -301,11 +301,15 @@ async function registerForPushNotificationsAsync(shouldRequest = true) {
 
 async function openRideFromNotification(remoteMessage?: any) {
   const rideId = remoteMessage?.data?.rideId;
+  const type = remoteMessage?.data?.type as string | undefined;
   if (!rideId) {
     Linking.openURL('citygo://').catch(err => console.log('[DeepLink] Error:', err));
     return;
   }
   await AsyncStorage.setItem('activeRideId', String(rideId));
+  // Guardar el tipo para que DriverHomeScreen sepa si debe mostrar el diálogo
+  // de solicitud pendiente (NEW_RIDE) o simplemente retomar un viaje en curso.
+  if (type) await AsyncStorage.setItem('pendingNotifType', type);
   Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() =>
     Linking.openURL('citygo://').catch(err => console.log('[DeepLink] Error:', err))
   );
@@ -360,8 +364,10 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
     const rideId = detail.notification?.data?.rideId as string | undefined;
+    const notifType = detail.notification?.data?.type as string | undefined;
     if (rideId) {
       await AsyncStorage.setItem('activeRideId', rideId);
+      if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
     }
   }
 });
@@ -527,10 +533,14 @@ function RootNavigator() {
       const unsubscribeOpened = messaging().onNotificationOpenedApp(openRideFromNotification);
       messaging().getInitialNotification().then(openRideFromNotification);
 
-      const notifResponseSub = Notifications.addNotificationResponseReceivedListener(response => {
-        const rideId = response.notification.request.content.data?.rideId;
+      // expo-notifications: cubre notifs de MENSAJE (y cualquier otra que no sea notifee)
+      const notifResponseSub = Notifications.addNotificationResponseReceivedListener(async response => {
+        const data = response.notification.request.content.data ?? {};
+        const rideId = data.rideId as string | undefined;
+        const type   = data.type   as string | undefined;
         if (rideId) {
-          AsyncStorage.setItem('activeRideId', String(rideId));
+          await AsyncStorage.setItem('activeRideId', String(rideId));
+          if (type) await AsyncStorage.setItem('pendingNotifType', type);
           Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() =>
             Linking.openURL('citygo://')
           );

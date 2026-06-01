@@ -15,7 +15,7 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { cancelSolicitudApi, getActiveRideApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, getActiveRideApi, getRideByIdApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
 import RatingModal from '../components/RatingModal';
 import { sendRatingApi, updateStatusDriverApi } from '../../utils/services/userService';
 import { coordsFromRideData, isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
@@ -270,7 +270,35 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
     useEffect(() => {
         const restoreSession = async () => {
-            console.log("Ingresa a restoreSession");
+            const savedRideId = await AsyncStorage.getItem('activeRideId');
+            const notifType   = await AsyncStorage.getItem('pendingNotifType');
+            await AsyncStorage.removeItem('pendingNotifType');
+
+            // ── Notificación de MENSAJE: abrir chat si la carrera sigue activa ─
+            if (notifType === 'MESSAGE' && savedRideId) {
+                try {
+                    const response = await getRideByIdApi(savedRideId);
+                    if (response?.rideData && isChatEnabledRideStatus(response.status)) {
+                        setCurrentRideId(savedRideId);
+                        setRideId(savedRideId);
+                        setActiveRideBackendStatus(response.status);
+                        setInitialChatMessages(response.rideData.messages || []);
+                        setDriverInfo(response.rideData.driver);
+                        setActiveRequestRide({ ride: response.rideData, driverId: response.rideData.driver?.id });
+                        const coords = coordsFromRideData(response.rideData);
+                        setPickupCoords(coords.pickup);
+                        setDestinationCoords(coords.destination);
+                        setPickupAddress(response.rideData.originAddress || '');
+                        setDestinationAddress(response.rideData.destAddress || '');
+                        setOtpValidate(isTripInProgress(response.status));
+                        setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
+                        socket.current?.emit('joinRide', savedRideId);
+                        setIsChatVisible(true); // ← abrir chat directamente
+                    }
+                } catch (_e) { /* silenciar */ }
+                return;
+            }
+
             try {
                 const response = await getActiveRideApi();
                 console.log("response getActiveRideApi", response);
@@ -311,16 +339,16 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
             } catch (error) {
                 console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
-                const savedRideId = await AsyncStorage.getItem('activeRideId');
-                if (savedRideId && socket.current) {
-                    socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
+                const savedRideId2 = savedRideId ?? await AsyncStorage.getItem('activeRideId');
+                if (savedRideId2 && socket.current) {
+                    socket.current.emit('getRideStatus', { rideId: savedRideId2 }, async (response: any) => {
                         if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
                             AsyncStorage.removeItem('activeRideId');
                             return;
                         }
-                        await AsyncStorage.setItem('activeRideId', savedRideId);
-                        setCurrentRideId(savedRideId);
-                        setRideId(savedRideId);
+                        await AsyncStorage.setItem('activeRideId', savedRideId2);
+                        setCurrentRideId(savedRideId2);
+                        setRideId(savedRideId2);
                         setActiveRideBackendStatus(response.status);
                         setOptvalue(response.rideData.otp);
                         setDriverInfo(response.rideData.driver);

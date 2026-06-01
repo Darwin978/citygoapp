@@ -84,6 +84,21 @@ export async function getPriceApi(originLat: number, originLng: number, destLat:
     }
 }
 
+/** Obtiene el estado completo de una carrera por ID.
+ *  Funciona aunque el conductor aún no esté asignado (status REQUESTED). */
+export async function getRideByIdApi(rideId: string) {
+    const token = await AsyncStorage.getItem('authToken');
+    const response = await fetch(`${endPoint.getRideById}/${rideId}/status`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) throw new Error('RIDE FETCH ERROR');
+    return response.json();
+}
+
 export async function driverCancelRideApi(rideId: string) {
     const token = await AsyncStorage.getItem('authToken');
     const response = await fetch(endPoint.driverCancelRide + `/${rideId}`, {
