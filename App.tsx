@@ -22,11 +22,13 @@ import TabNavigator from './src/navigation/TabNavigator';
 import * as Location from 'expo-location';
 import messaging from '@react-native-firebase/messaging';
 import { saveTokenInBackend } from './utils/services/userService';
+import { BACKEND_URL } from './utils/services/apiConfig';
 
 // @notifee: gestión avanzada de notificaciones con soporte Full Screen Intent
 import notifee, {
   AndroidCategory,
   AndroidImportance,
+  AndroidLaunchActivityFlag,
   AndroidNotificationSetting,
   AndroidVisibility,
   EventType,
@@ -46,6 +48,8 @@ const RIDE_CHANNEL_ID = 'rides-critical-v3';   // ← sube aquí cuando necesite
 const MSG_CHANNEL_ID = 'messages-channel';
 const STATUS_CHANNEL_ID = 'status-channel';
 const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
+const ACCEPT_RIDE_ACTION_ID = 'accept_ride';
+const VIEW_RIDE_ACTION_ID = 'view_ride';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CANALES ANDROID (expo-notifications — para notificaciones vía scheduleNotification)
@@ -58,8 +62,8 @@ const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
 //   • messages-channel   → creado y usado ÚNICAMENTE por expo-notifications ← aquí
 //   • status-channel     → creado y usado ÚNICAMENTE por expo-notifications ← aquí
 //
-// expo-notifications hereda el ícono del manifest (expo.modules.notifications
-// .default_notification_icon = @drawable/notification_icon) automáticamente.
+// expo-notifications hereda el ícono del manifest
+// (default_notification_icon = @drawable/ic_notification) automáticamente.
 // ─────────────────────────────────────────────────────────────────────────────
 if (Platform.OS === 'android') {
   // Canal mensajes: prioridad alta pero no intrusiva
@@ -139,7 +143,14 @@ async function setupNotifeeChannels() {
 // NOTIFICACIÓN DE NUEVA CARRERA (máxima prioridad, Full Screen Intent)
 // Se usa tanto en foreground (onMessage) como en background (setBackgroundMessageHandler).
 // ─────────────────────────────────────────────────────────────────────────────
-async function showRideNotification(title: string, body: string, rideId: string) {
+async function showRideNotification(
+  title: string,
+  body: string,
+  rideId: string,
+  type: 'NEW_RIDE' | 'ARRIVED' = 'NEW_RIDE',
+) {
+  const isNewRide = type === 'NEW_RIDE';
+
   if (Platform.OS === 'android') {
     try {
       // Crear el canal aquí garantiza que existe incluso en contexto headless
@@ -163,8 +174,8 @@ async function showRideNotification(title: string, body: string, rideId: string)
           channelId: RIDE_CHANNEL_ID,
           // @notifee NO hereda el icono del meta-data del manifest; hay que declararlo
           // explícitamente. Usamos el mismo drawable que usa expo-notifications:
-          // android/app/src/main/res/drawable-*/notification_icon.png
-          smallIcon: 'notification_icon',
+          // android/app/src/main/res/drawable/ic_notification.png
+          smallIcon: 'ic_notification',
           color: '#1D4ED8',
           // Categoría CALL: el sistema trata la notificación como una llamada entrante
           // y le da prioridad máxima en la pantalla de bloqueo
@@ -182,14 +193,34 @@ async function showRideNotification(title: string, body: string, rideId: string)
           fullScreenAction: {
             id: 'default',
             launchActivity: 'default', // abre MainActivity
+            launchActivityFlags: [AndroidLaunchActivityFlag.NEW_TASK, AndroidLaunchActivityFlag.SINGLE_TOP],
           },
           pressAction: {
             id: 'default',
             launchActivity: 'default',
+            launchActivityFlags: [AndroidLaunchActivityFlag.NEW_TASK, AndroidLaunchActivityFlag.SINGLE_TOP],
           },
+          actions: isNewRide
+            ? [
+              {
+                title: 'Aceptar',
+                pressAction: {
+                  id: ACCEPT_RIDE_ACTION_ID,
+                },
+              },
+              {
+                title: 'Ver carrera',
+                pressAction: {
+                  id: VIEW_RIDE_ACTION_ID,
+                  launchActivity: 'default',
+                  launchActivityFlags: [AndroidLaunchActivityFlag.NEW_TASK, AndroidLaunchActivityFlag.SINGLE_TOP],
+                },
+              },
+            ]
+            : undefined,
           showTimestamp: true,
         },
-        data: { rideId, type: 'NEW_RIDE' },
+        data: { rideId, type },
       });
 
       console.log('[Notifee] ✅ Full Screen Intent mostrado para rideId:', rideId);
@@ -214,7 +245,7 @@ async function showRideNotification(title: string, body: string, rideId: string)
           list: true,
         },
       },
-      data: { rideId, type: 'NEW_RIDE' },
+      data: { rideId, type },
     });
   }
 }
@@ -315,6 +346,38 @@ async function openRideFromNotification(remoteMessage?: any) {
   );
 }
 
+async function acceptRideFromNotification(rideId: string) {
+  const token = await AsyncStorage.getItem('authToken');
+  if (!token) {
+    await AsyncStorage.setItem('pendingNotifAction', ACCEPT_RIDE_ACTION_ID);
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/ride/${rideId}/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const result = await response.json().catch(() => null);
+    if (!response.ok || result?.status !== 'success') {
+      await AsyncStorage.setItem('pendingNotifAction', ACCEPT_RIDE_ACTION_ID);
+      return false;
+    }
+
+    await AsyncStorage.setItem('activeRideId', rideId);
+    await AsyncStorage.removeItem('pendingNotifAction');
+    await AsyncStorage.removeItem('pendingNotifType');
+    return true;
+  } catch (error) {
+    await AsyncStorage.setItem('pendingNotifAction', ACCEPT_RIDE_ACTION_ID);
+    return false;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER DE MENSAJES EN SEGUNDO PLANO / APP CERRADA (FCM)
 //
@@ -346,7 +409,7 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
     if (type === 'NEW_RIDE' || type === 'ARRIVED') {
       // NEW_RIDE → conductor recibe FSI con solicitud de carrera
       // ARRIVED  → cliente recibe FSI cuando el conductor ya está esperando afuera
-      await showRideNotification(title, body, rideId);
+      await showRideNotification(title, body, rideId, type);
     } else if (type === 'MESSAGE') {
       await showSimpleNotification(title, body, MSG_CHANNEL_ID);
     } else {
@@ -365,11 +428,39 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
     const rideId = detail.notification?.data?.rideId as string | undefined;
     const notifType = detail.notification?.data?.type as string | undefined;
+    const actionId = detail.pressAction?.id;
     if (rideId) {
       await AsyncStorage.setItem('activeRideId', rideId);
       if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
+      if (actionId === ACCEPT_RIDE_ACTION_ID) {
+        await acceptRideFromNotification(rideId);
+      }
+      Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
     }
   }
+});
+
+// El botón "Aceptar" debe funcionar incluso si la app ya está abierta y la
+// pantalla del conductor todavía no procesó el evento local.
+notifee.onForegroundEvent(async ({ type, detail }) => {
+  if (type !== EventType.ACTION_PRESS) return;
+  const rideId = detail.notification?.data?.rideId as string | undefined;
+  const notifType = detail.notification?.data?.type as string | undefined;
+  const actionId = detail.pressAction?.id;
+
+  if (!rideId) return;
+
+  await AsyncStorage.setItem('activeRideId', rideId);
+  if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
+
+  if (actionId === ACCEPT_RIDE_ACTION_ID) {
+    await acceptRideFromNotification(rideId);
+    if (detail.notification?.id) {
+      await notifee.cancelNotification(detail.notification.id);
+    }
+  }
+
+  Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -441,7 +532,7 @@ function RootNavigator() {
       if (type === 'NEW_RIDE' || type === 'ARRIVED') {
         // NEW_RIDE → sonido/vibración para conductor (el diálogo lo abre el socket)
         // ARRIVED  → FSI para cliente cuando el conductor ya espera afuera
-        await showRideNotification(title, body, rideId);
+        await showRideNotification(title, body, rideId, type);
       } else if (type === 'MESSAGE') {
         await showSimpleNotification(title, body, MSG_CHANNEL_ID);
       } else {
@@ -483,7 +574,8 @@ function RootNavigator() {
         if (Platform.OS === 'android' && Number(Platform.Version) >= 34) {
           try {
             const ns = await notifee.getNotificationSettings();
-            if (ns.android.fullScreenIntent === AndroidNotificationSetting.DISABLED) {
+            const fullScreenIntentSetting = (ns.android as any)?.fullScreenIntent;
+            if (fullScreenIntentSetting === AndroidNotificationSetting.DISABLED) {
               Alert.alert(
                 '⚠️ Alertas en pantalla completa desactivadas',
                 'Las notificaciones de carreras no pueden aparecer sobre la pantalla de bloqueo. ' +
@@ -537,7 +629,7 @@ function RootNavigator() {
       const notifResponseSub = Notifications.addNotificationResponseReceivedListener(async response => {
         const data = response.notification.request.content.data ?? {};
         const rideId = data.rideId as string | undefined;
-        const type   = data.type   as string | undefined;
+        const type = data.type as string | undefined;
         if (rideId) {
           await AsyncStorage.setItem('activeRideId', String(rideId));
           if (type) await AsyncStorage.setItem('pendingNotifType', type);
