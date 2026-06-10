@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "notification": {
       "icon": "./assets/notification_icon.png",
       "color": "#1D4ED8"
@@ -51,7 +51,9 @@
         "USE_FULL_SCREEN_INTENT",
         "VIBRATE",
         "WAKE_LOCK",
-        "SYSTEM_ALERT_WINDOW"
+        "SYSTEM_ALERT_WINDOW",
+        "RECEIVE_BOOT_COMPLETED",
+        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -91,6 +93,7 @@
       ],
       "./plugins/withModularHeadersIOS",
       "./plugins/withNotificationIcon",
+      "./plugins/withKeepAliveAndroid",
       "@react-native-firebase/app",
       "@react-native-firebase/messaging"
     ]

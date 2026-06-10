@@ -1,6 +1,6 @@
 
-//export const BACKEND_URL = process.env.BACKEND_URL || 'https://api.citygoec.com';
-export const BACKEND_URL = 'http://192.168.1.99:3000';
+export const BACKEND_URL = process.env.BACKEND_URL || 'https://api.citygoec.com';
+//export const BACKEND_URL = 'http://192.168.1.107:3000';
 export const endPoint = {
     login: `${BACKEND_URL}/auth/login`,
     registerClient: `${BACKEND_URL}/auth/register/client`,

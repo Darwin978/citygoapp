@@ -9,6 +9,7 @@ interface PermissionContextProps {
   backgroundLocationGranted: boolean;
   audioGranted: boolean;
   termsAccepted: boolean;
+  permissionsReady: boolean;
   requestPermissions: () => Promise<void>;
   requestBackgroundLocationPermission: () => Promise<void>;
   acceptTerms: () => Promise<void>;
@@ -23,6 +24,7 @@ const PermissionContext = createContext<PermissionContextProps>({
   backgroundLocationGranted: false,
   audioGranted: false,
   termsAccepted: false,
+  permissionsReady: false,
   requestPermissions: async () => { },
   requestBackgroundLocationPermission: async () => { },
   acceptTerms: async () => { },
@@ -35,21 +37,26 @@ export const PermissionProvider = ({ children }: any) => {
   const [backgroundLocationGranted, setBackgroundLocationGranted] = useState(false);
   const [audioGranted, setAudioGranted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [permissionsReady, setPermissionsReady] = useState(false);
 
   useEffect(() => {
     loadInitialValues();
   }, []);
 
   const loadInitialValues = async () => {
-    const terms = await AsyncStorage.getItem("termsAccepted");
-    setTermsAccepted(terms === "true");
+    try {
+      const terms = await AsyncStorage.getItem("termsAccepted");
+      setTermsAccepted(terms === "true");
 
-    const loc = await Location.getForegroundPermissionsAsync();
-    setLocationGranted(loc.status === "granted");
+      const loc = await Location.getForegroundPermissionsAsync();
+      setLocationGranted(loc.status === "granted");
 
-    // Verificar también el permiso de background (Android 10+ / iOS "Always")
-    const bgLoc = await Location.getBackgroundPermissionsAsync();
-    setBackgroundLocationGranted(bgLoc.status === "granted");
+      // Verificar también el permiso de background (Android 10+ / iOS "Always")
+      const bgLoc = await Location.getBackgroundPermissionsAsync();
+      setBackgroundLocationGranted(bgLoc.status === "granted");
+    } finally {
+      setPermissionsReady(true);
+    }
   };
 
   const requestPermissions = async () => {
@@ -358,6 +365,7 @@ export const PermissionProvider = ({ children }: any) => {
         backgroundLocationGranted,
         audioGranted,
         termsAccepted,
+        permissionsReady,
         requestPermissions,
         requestBackgroundLocationPermission,
         acceptTerms,

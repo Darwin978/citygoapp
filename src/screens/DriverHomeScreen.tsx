@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking, AppState, DeviceEventEmitter } from 'react-native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -19,6 +19,7 @@ import ChatModal from '../components/ChatModal';
 import { isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToDriverScreen } from '../../utils/services/rideFlow';
 import { useCustomAlert } from '../../utils/context/AlertContext';
 import notifee, { EventType } from '@notifee/react-native';
+import { startKeepAlive, stopKeepAlive } from '../../utils/services/keepAlive';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_APIKEY = 'AIzaSyBfVCCME9FaQG7zUd0xbeAQDehrYnFrpZA';
@@ -55,6 +56,8 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     // Sockets y Seguimiento
     const socket = useRef<any>(null);
     const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+    const currentRideIdRef = useRef<string | null>(null);
+    useEffect(() => { currentRideIdRef.current = currentRideId; }, [currentRideId]);
 
     // Solicitudes de Viaje (Conductor)
     const [availableRequests, setAvailableRequests] = useState<any[]>([]);
@@ -67,6 +70,13 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     const [isChatVisible, setIsChatVisible] = useState(false);
     const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
     const [activeRideBackendStatus, setActiveRideBackendStatus] = useState<string | null>(null);
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    useEffect(() => {
+        if (!currentRideId) {
+            setUnreadCount(0);
+        }
+    }, [currentRideId]);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -109,7 +119,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 auth: { token },
             });
 
-        socket.current.on('connect', () => {
+        socket.current.on('connect', async () => {
             console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
 
             if (role === Roles.DRIVER) {
@@ -117,6 +127,11 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 socket.current.emit('getAvailableRides', (rides: any[]) => {
                     setAvailableRequests(rides);
                 });
+            }
+
+            const activeRideId = currentRideIdRef.current || await AsyncStorage.getItem('activeRideId');
+            if (activeRideId) {
+                socket.current.emit('joinRide', activeRideId);
             }
         });
 
@@ -270,7 +285,10 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         socket.current?.emit('joinRide', rideId);
         setOtpValidate(isTripInProgress(response.status));
         setStatus(mapBackendStatusToDriverScreen(response.status) as any);
-        if (openChat) setIsChatVisible(true);
+        if (openChat) {
+            setUnreadCount(0);
+            setIsChatVisible(true);
+        }
     };
 
     const acceptRideByRestAndHydrate = async (rideId: string) => {
@@ -348,133 +366,144 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         });
     };
 
-    useEffect(() => {
-        const restoreSession = async () => {
-            // ── Leer contexto guardado por la notificación ───────────────────
-            const savedRideId   = await AsyncStorage.getItem('activeRideId');
-            const notifType     = await AsyncStorage.getItem('pendingNotifType');
-            const notifAction   = await AsyncStorage.getItem('pendingNotifAction');
-            await AsyncStorage.removeItem('pendingNotifType'); // consumir una sola vez
-            await AsyncStorage.removeItem('pendingNotifAction'); // consumir una sola vez
+    const restoreSession = async () => {
+        // ── Leer contexto guardado por la notificación ───────────────────
+        const savedRideId   = await AsyncStorage.getItem('activeRideId');
+        const notifType     = await AsyncStorage.getItem('pendingNotifType');
+        const notifAction   = await AsyncStorage.getItem('pendingNotifAction');
+        await AsyncStorage.removeItem('pendingNotifType'); // consumir una sola vez
+        await AsyncStorage.removeItem('pendingNotifAction'); // consumir una sola vez
 
-            // ── Caso 0: notificación de MENSAJE → abrir chat si la carrera sigue activa ─
-            if (notifType === 'MESSAGE' && savedRideId) {
-                try {
-                    const response = await getRideByIdApi(savedRideId);
-                    if (response?.rideData && isChatEnabledRideStatus(response.status)) {
-                        await hydrateActiveRide(savedRideId, response, true);
-                    }
-                } catch (_e) { /* silenciar */ }
-                return;
-            }
-
-            // ── Caso 1: el conductor abrió el app tocando una notif NEW_RIDE ─
-            // La carrera está en REQUESTED → el conductor NO está asignado aún,
-            // por eso getActiveRideApi() devuelve IDLE y no sirve aquí.
-            // Usamos getRideByIdApi(rideId) que obtiene la carrera por ID directo.
-            if (notifType === 'NEW_RIDE' && savedRideId) {
-                try {
-                    const response = await getRideByIdApi(savedRideId);
-                    if (response?.rideData && isActiveBackendRideStatus(response.status) && response.status !== 'TO_RATING') {
-                        await hydrateActiveRide(savedRideId, response);
-                        return;
-                    }
-
-                    if (response?.status === 'REQUESTED' && response?.rideData) {
-                        const req = buildPendingRequestFromRide(savedRideId, response);
-                        setPendingRequest(req);
-                        if (notifAction === ACCEPT_RIDE_ACTION_ID) {
-                            try {
-                                await acceptRideByRestAndHydrate(savedRideId);
-                            } catch (_e) {
-                                await acceptRideRequest(req);
-                            }
-                        } else {
-                            setShowRequestDialog(true);
-                        }
-                        return; // no seguir con la restauración de viaje activo
-                    }
-                    // Si ya fue aceptada por otro conductor, limpiar y salir
-                    await AsyncStorage.removeItem('activeRideId');
-                } catch (e) {
-                    console.log('[restoreSession] Error al obtener carrera por ID:', e);
-                }
-                return;
-            }
-
-            // ── Caso 2: restaurar un viaje activo (ACCEPTED, IN_PROGRESS…) ──
+        // ── Caso 0: notificación de MENSAJE → abrir chat si la carrera sigue activa ─
+        if (notifType === 'MESSAGE' && savedRideId) {
             try {
-                const response = await getActiveRideApi();
-                if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
-                    await AsyncStorage.removeItem('activeRideId');
+                const response = await getRideByIdApi(savedRideId);
+                if (response?.rideData && isChatEnabledRideStatus(response.status)) {
+                    await hydrateActiveRide(savedRideId, response, true);
+                }
+            } catch (_e) { /* silenciar */ }
+            return;
+        }
+
+        // ── Caso 1: el conductor abrió el app tocando una notif NEW_RIDE ─
+        // La carrera está en REQUESTED → el conductor NO está asignado aún,
+        // por eso getActiveRideApi() devuelve IDLE y no sirve aquí.
+        // Usamos getRideByIdApi(rideId) que obtiene la carrera por ID directo.
+        if (notifType === 'NEW_RIDE' && savedRideId) {
+            try {
+                const response = await getRideByIdApi(savedRideId);
+                if (response?.rideData && isActiveBackendRideStatus(response.status) && response.status !== 'TO_RATING' && response.status !== 'REQUESTED') {
+                    await hydrateActiveRide(savedRideId, response);
                     return;
                 }
 
-                const activeRideId = response.rideData.tripId;
-                await hydrateActiveRide(activeRideId, response);
-            } catch (error) {
-                // Fallback vía socket si el REST falla
-                if (savedRideId && socket.current) {
-                    socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
-                        if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING') {
-                            AsyncStorage.removeItem('activeRideId');
-                            return;
+                if (response?.status === 'REQUESTED' && response?.rideData) {
+                    const req = buildPendingRequestFromRide(savedRideId, response);
+                    setPendingRequest(req);
+                    if (notifAction === ACCEPT_RIDE_ACTION_ID) {
+                        try {
+                            await acceptRideByRestAndHydrate(savedRideId);
+                        } catch (_e) {
+                            await acceptRideRequest(req);
                         }
-                        await hydrateActiveRide(savedRideId, response);
-                    });
+                    } else {
+                        setShowRequestDialog(true);
+                    }
+                    return; // no seguir con la restauración de viaje activo
                 }
+                // Si ya fue aceptada por otro conductor, limpiar y salir
+                await AsyncStorage.removeItem('activeRideId');
+            } catch (e) {
+                console.log('[restoreSession] Error al obtener carrera por ID:', e);
             }
-        };
-        restoreSession();
-    }, [userId])
+            return;
+        }
 
-    // ── Handler notifee en FOREGROUND ────────────────────────────────────────
-    // Cuando el conductor toca una notificación de nueva carrera mientras la app
-    // está abierta, re-verificamos si hay una carrera REQUESTED pendiente.
-    useEffect(() => {
-        const unsubscribe = notifee.onForegroundEvent(async ({ type, detail }) => {
-            if (type !== EventType.PRESS && type !== EventType.ACTION_PRESS) return;
-            const notifType = detail.notification?.data?.type as string | undefined;
-            const rideId = detail.notification?.data?.rideId as string | undefined;
-            const actionId = detail.pressAction?.id;
-            if (actionId === ACCEPT_RIDE_ACTION_ID) return;
-            if ((notifType === 'NEW_RIDE') && rideId) {
-                await AsyncStorage.setItem('activeRideId', rideId);
-                // Re-consultar el estado de la carrera para mostrar el diálogo
-                try {
-                    // Usar getRideByIdApi: funciona aunque el conductor no esté asignado aún
-                    const response = await getRideByIdApi(rideId);
-                    if (response?.rideData && isActiveBackendRideStatus(response.status) && response.status !== 'TO_RATING') {
-                        await hydrateActiveRide(rideId, response);
-                        if (detail.notification?.id) {
-                            await notifee.cancelNotification(detail.notification.id);
-                        }
+        // ── Caso 2: restaurar un viaje activo (ACCEPTED, IN_PROGRESS…) ──
+        try {
+            const response = await getActiveRideApi();
+            if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING' || response.status === 'REQUESTED') {
+                await AsyncStorage.removeItem('activeRideId');
+                // Limpiar la interfaz del conductor si el viaje no está activo
+                setCurrentRideId(null);
+                setActiveRideBackendStatus(null);
+                return;
+            }
+
+            const activeRideId = response.rideData.tripId;
+            await hydrateActiveRide(activeRideId, response);
+        } catch (error) {
+            // Fallback vía socket si el REST falla
+            if (savedRideId && socket.current) {
+                socket.current.emit('getRideStatus', { rideId: savedRideId }, async (response: any) => {
+                    if (!response?.rideData || !isActiveBackendRideStatus(response.status) || response.status === 'TO_RATING' || response.status === 'REQUESTED') {
+                        AsyncStorage.removeItem('activeRideId');
                         return;
                     }
+                    await hydrateActiveRide(savedRideId, response);
+                });
+            }
+        }
+    };
 
-                    if (response?.status === 'REQUESTED' && response?.rideData) {
-                        const req = buildPendingRequestFromRide(rideId, response);
-                        setPendingRequest(req);
-                        if (actionId === ACCEPT_RIDE_ACTION_ID) {
-                            try {
-                                await acceptRideByRestAndHydrate(rideId);
-                            } catch (_e) {
-                                await acceptRideRequest(req);
-                            }
-                            if (detail.notification?.id) {
-                                await notifee.cancelNotification(detail.notification.id);
-                            }
-                        } else {
-                            setShowRequestDialog(true);
-                        }
-                    }
-                } catch (_e) { /* silenciar — el diálogo simplemente no abre */ }
+    useEffect(() => {
+        if (!userId) return;
+        restoreSession();
+    }, [userId]);
+
+    // Escuchar si el conductor acepta la carrera desde el banner/notificación nativa
+    useEffect(() => {
+        const acceptSub = DeviceEventEmitter.addListener('RIDE_ACCEPTED_FROM_NOTIF', async ({ rideId }) => {
+            console.log('[DriverHomeScreen] Evento RIDE_ACCEPTED_FROM_NOTIF recibido:', rideId);
+            try {
+                const response = await getRideByIdApi(rideId);
+                if (response?.rideData && isActiveBackendRideStatus(response.status)) {
+                    await hydrateActiveRide(rideId, response);
+                }
+            } catch (err) {
+                console.error('[DriverHomeScreen] Error procesando RIDE_ACCEPTED_FROM_NOTIF:', err);
             }
         });
-        return () => unsubscribe();
-    }, []);
+
+        return () => {
+            acceptSub.remove();
+        };
+    }, [userId]);
+
+    // Escuchar si el conductor rechaza la carrera desde el banner/notificación nativa
+    useEffect(() => {
+        const rejectSub = DeviceEventEmitter.addListener('RIDE_REJECTED_FROM_NOTIF', ({ rideId }) => {
+            console.log('[DriverHomeScreen] Evento RIDE_REJECTED_FROM_NOTIF recibido:', rideId);
+            setAvailableRequests(prev => prev.filter(r => r.tripId !== rideId));
+            if (pendingRequest?.tripId === rideId) {
+                setShowRequestDialog(false);
+                setPendingRequest(null);
+            }
+        });
+
+        return () => {
+            rejectSub.remove();
+        };
+    }, [pendingRequest]);
+
+    // Actualizar la pantalla cuando la app regrese de segundo plano a primer plano
+    useEffect(() => {
+        const appStateSub = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active' && userId) {
+                console.log('[DriverHomeScreen] App volvió a primer plano. Sincronizando estado...');
+                restoreSession();
+            }
+        });
+
+        return () => {
+            appStateSub.remove();
+        };
+    }, [userId]);
 
     // ── Deep link en vivo: citygo://ride/{rideId} ─────────────────────────────
+    // NOTA: onForegroundEvent de notifee está centralizado en App.tsx.
+    // Cuando el conductor toca una notif con la app abierta, App.tsx hace
+    // Linking.openURL → este listener recibe la URL y muestra el diálogo.
     useEffect(() => {
         const handleUrl = async ({ url }: { url: string }) => {
             if (!url.startsWith('citygo://ride/')) return;
@@ -496,7 +525,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     return;
                 }
 
-                if (isActiveBackendRideStatus(response.status) && response.status !== 'TO_RATING') {
+                if (isActiveBackendRideStatus(response.status) && response.status !== 'TO_RATING' && response.status !== 'REQUESTED') {
                     await hydrateActiveRide(rideId, response);
                     return;
                 }
@@ -699,9 +728,12 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     const handleChangeStatusDriver = async (onlineStatus: boolean) => {
         setIsOnline(onlineStatus);
         await updateStatusDriverApi(onlineStatus);
-        if (!onlineStatus && onOffline) {
+        if (onlineStatus) {
+            startKeepAlive(); // ← mantener proceso vivo mientras el conductor está disponible
+        } else {
             if (['IDLE', 'PICKUP', 'DESTINATION', 'ROUTE', 'SEARCHING'].includes(status)) {
-                onOffline();
+                stopKeepAlive(); // ← detener el servicio solo si no hay carrera activa
+                if (onOffline) onOffline();
             } else {
                 showAlert('Modo Cliente', 'Pasarás a la vista de cliente al terminar tu carrera actual.');
             }
@@ -1123,6 +1155,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
                             textInput: styles.searchInput,
                             row: { padding: 13, height: 44, flexDirection: 'row' },
+                            description: { color: '#000000' },
                         }}
                         enablePoweredByContainer={false}
                         keyboardShouldPersistTaps="handled"
@@ -1143,6 +1176,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
                             textInput: styles.searchInput,
                             row: { padding: 13, height: 44, flexDirection: 'row' },
+                            description: { color: '#000000' },
                         }}
                         enablePoweredByContainer={false}
                         keyboardShouldPersistTaps="handled"
@@ -1306,9 +1340,19 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
                         <TouchableOpacity
                             style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                            onPress={() => setIsChatVisible(true)}
+                            onPress={() => {
+                                setUnreadCount(0);
+                                setIsChatVisible(true);
+                            }}
                         >
-                            <Ionicons name="chatbubbles" size={20} color="white" />
+                            <View style={{ position: 'relative' }}>
+                                <Ionicons name="chatbubbles" size={20} color="white" />
+                                {unreadCount > 0 && (
+                                    <View style={styles.chatBadgeCount}>
+                                        <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                    </View>
+                                )}
+                            </View>
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
                         </TouchableOpacity>
                         )}
@@ -1356,9 +1400,19 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
                         <TouchableOpacity
                             style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                            onPress={() => setIsChatVisible(true)}
+                            onPress={() => {
+                                setUnreadCount(0);
+                                setIsChatVisible(true);
+                            }}
                         >
-                            <Ionicons name="chatbubbles" size={20} color="white" />
+                            <View style={{ position: 'relative' }}>
+                                <Ionicons name="chatbubbles" size={20} color="white" />
+                                {unreadCount > 0 && (
+                                    <View style={styles.chatBadgeCount}>
+                                        <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                    </View>
+                                )}
+                            </View>
                             <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
                         </TouchableOpacity>
                         )}
@@ -1425,6 +1479,11 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 rideId={currentRideId}
                 userId={userId}
                 initialMessages={initialChatMessages}
+                onNewMessage={() => {
+                    if (!isChatVisible) {
+                        setUnreadCount(prev => prev + 1);
+                    }
+                }}
             />
         </View>
     );
@@ -1704,4 +1763,24 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: 'bold',
     },
+    chatBadgeCount: {
+        position: 'absolute',
+        top: -6,
+        right: -10,
+        backgroundColor: '#EF4444',
+        borderRadius: 9,
+        minWidth: 18,
+        height: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: 'white',
+    },
+    chatBadgeText: {
+        color: 'white',
+        fontSize: 9,
+        fontWeight: 'bold',
+        textAlign: 'center',
+    }
 });

@@ -53,6 +53,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     // Sockets y Seguimiento
     const socket = useRef<any>(null);
     const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+    const currentRideIdRef = useRef<string | null>(null);
+    const ratingShownForRideRef = useRef<string | null>(null);
+    useEffect(() => { currentRideIdRef.current = currentRideId; }, [currentRideId]);
 
     // Solicitudes de Viaje (Conductor)
     const [availableRequests, setAvailableRequests] = useState<any[]>([]);
@@ -68,6 +71,13 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     const [rideId, setRideId] = useState<string | null>(null);
     const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
     const [activeRideBackendStatus, setActiveRideBackendStatus] = useState<string | null>(null);
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    useEffect(() => {
+        if (!currentRideId) {
+            setUnreadCount(0);
+        }
+    }, [currentRideId]);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -91,6 +101,49 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         getUserId();
     }, []);
 
+    const hydratePassengerRide = async (activeRideId: string, response: any) => {
+        if (!response?.rideData || !isActiveBackendRideStatus(response.status)) return;
+
+        // Evitar que al conductor se le pida calificar su propio viaje al pasar a modo cliente/offline
+        const currentUserId = userId ?? await AsyncStorage.getItem('userId');
+        if (response.rideData.driver?.userId === currentUserId) {
+            console.log('[UserHomeScreen] Ignorando carrera donde somos el conductor:', activeRideId);
+            await AsyncStorage.removeItem('activeRideId');
+            return;
+        }
+
+        await AsyncStorage.setItem('activeRideId', activeRideId);
+        setCurrentRideId(activeRideId);
+        setRideId(activeRideId);
+        setActiveRideBackendStatus(response.status);
+        setOptvalue(response.rideData.otp);
+        setDriverInfo(response.rideData.driver);
+        setInitialChatMessages(response.rideData.messages || []);
+        setActiveRequestRide({ ride: response.rideData, driverId: response.rideData.driver?.id });
+
+        const coords = coordsFromRideData(response.rideData);
+        setPickupCoords(coords.pickup);
+        setDestinationCoords(coords.destination);
+        setPickupAddress(response.rideData.originAddress || '');
+        setDestinationAddress(response.rideData.destAddress || '');
+        setPendingRequest({
+            tripId: activeRideId,
+            clientName: response.rideData?.clientName || 'Pasajero',
+        });
+
+        socket.current?.emit('joinRide', activeRideId);
+
+        if (response.status === 'TO_RATING') {
+            setStatus('TO_RATING');
+            setActiveRideBackendStatus('TO_RATING');
+            setRatingModalVisible(true);
+            return;
+        }
+
+        setOtpValidate(isTripInProgress(response.status));
+        setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
+    };
+
     // 1. Inicializar Sockets
     useEffect(() => {
         if (!userId) return;
@@ -107,13 +160,21 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 auth: { token },
             });
 
-            socket.current.on('connect', () => {
+            socket.current.on('connect', async () => {
                 console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
 
                 if (role === Roles.DRIVER) {
                     console.log("Ingresa a getAvailableRides");
                     socket.current.emit('getAvailableRides', (rides: any[]) => {
                         setAvailableRequests(rides);
+                    });
+                }
+
+                const activeRideId = currentRideIdRef.current || await AsyncStorage.getItem('activeRideId');
+                if (activeRideId) {
+                    socket.current.emit('joinRide', activeRideId);
+                    socket.current.emit('getRideStatus', { rideId: activeRideId }, async (response: any) => {
+                        await hydratePassengerRide(activeRideId, response);
                     });
                 }
             });
@@ -205,6 +266,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setPickupAddress('');
                 setDestinationAddress('');
                 setOtpValidate(false);
+                setInitialChatMessages([]);
                 pickupSearchRef.current?.setAddressText('');
                 destinationSearchRef.current?.setAddressText('');
 
@@ -224,6 +286,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setRouteDetails(null);
                 setPickupAddress('');
                 setDestinationAddress('');
+                setInitialChatMessages([]);
                 pickupSearchRef.current?.setAddressText('');
                 destinationSearchRef.current?.setAddressText('');
                 setStatus('PICKUP');
@@ -235,6 +298,10 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             });
 
             socket.current.on('ride_finished', async (data: any) => {
+                const finishedRideId = data?.rideId || currentRideIdRef.current;
+                if (finishedRideId && ratingShownForRideRef.current === finishedRideId) return;
+                if (finishedRideId) ratingShownForRideRef.current = finishedRideId;
+
                 // Guardamos el estado para calificar, pero limpiamos el mapa
                 setPickupCoords(null);
                 setDestinationCoords(null);
@@ -242,6 +309,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setPickupAddress('');
                 setDestinationAddress('');
                 setOtpValidate(false);
+                setInitialChatMessages([]);
                 pickupSearchRef.current?.setAddressText('');
                 destinationSearchRef.current?.setAddressText('');
 
@@ -279,20 +347,8 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 try {
                     const response = await getRideByIdApi(savedRideId);
                     if (response?.rideData && isChatEnabledRideStatus(response.status)) {
-                        setCurrentRideId(savedRideId);
-                        setRideId(savedRideId);
-                        setActiveRideBackendStatus(response.status);
-                        setInitialChatMessages(response.rideData.messages || []);
-                        setDriverInfo(response.rideData.driver);
-                        setActiveRequestRide({ ride: response.rideData, driverId: response.rideData.driver?.id });
-                        const coords = coordsFromRideData(response.rideData);
-                        setPickupCoords(coords.pickup);
-                        setDestinationCoords(coords.destination);
-                        setPickupAddress(response.rideData.originAddress || '');
-                        setDestinationAddress(response.rideData.destAddress || '');
-                        setOtpValidate(isTripInProgress(response.status));
-                        setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
-                        socket.current?.emit('joinRide', savedRideId);
+                        await hydratePassengerRide(savedRideId, response);
+                        setUnreadCount(0);
                         setIsChatVisible(true); // ← abrir chat directamente
                     }
                 } catch (_e) { /* silenciar */ }
@@ -308,35 +364,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 }
 
                 const activeRideId = response.rideData.tripId;
-                await AsyncStorage.setItem('activeRideId', activeRideId);
-                setCurrentRideId(activeRideId);
-                setRideId(activeRideId);
-                setActiveRideBackendStatus(response.status);
-                setOptvalue(response.rideData.otp);
-                setDriverInfo(response.rideData.driver);
-                setInitialChatMessages(response.rideData.messages || []);
-                setActiveRequestRide({ ride: response.rideData, driverId: response.rideData.driver?.id });
-
-                const coords = coordsFromRideData(response.rideData);
-                setPickupCoords(coords.pickup);
-                setDestinationCoords(coords.destination);
-                setPickupAddress(response.rideData.originAddress || '');
-                setDestinationAddress(response.rideData.destAddress || '');
-                setPendingRequest({
-                    tripId: activeRideId,
-                    clientName: response.rideData?.clientName || 'Pasajero',
-                });
-
-                socket.current?.emit('joinRide', activeRideId);
-
-                if (response.status === 'TO_RATING') {
-                    setStatus('TO_RATING');
-                    setRatingModalVisible(true);
-                    return;
-                }
-
-                setOtpValidate(isTripInProgress(response.status));
-                setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
+                await hydratePassengerRide(activeRideId, response);
             } catch (error) {
                 console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
                 const savedRideId2 = savedRideId ?? await AsyncStorage.getItem('activeRideId');
@@ -346,20 +374,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                             AsyncStorage.removeItem('activeRideId');
                             return;
                         }
-                        await AsyncStorage.setItem('activeRideId', savedRideId2);
-                        setCurrentRideId(savedRideId2);
-                        setRideId(savedRideId2);
-                        setActiveRideBackendStatus(response.status);
-                        setOptvalue(response.rideData.otp);
-                        setDriverInfo(response.rideData.driver);
-                        setInitialChatMessages(response.rideData.messages || []);
-                        setActiveRequestRide({ ride: response.rideData, driverId: response.rideData.driver?.id });
-                        const coords = coordsFromRideData(response.rideData);
-                        setPickupCoords(coords.pickup);
-                        setDestinationCoords(coords.destination);
-                        socket.current.emit('joinRide', savedRideId);
-                        setOtpValidate(isTripInProgress(response.status));
-                        setStatus(mapBackendStatusToPassengerScreen(response.status) as any);
+                        await hydratePassengerRide(savedRideId2, response);
                     });
                 }
             }
@@ -421,6 +436,13 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
     // --- FUNCIONES DE APOYO ---
 
+    const checkSameLocation = (c1: any, c2: any) => {
+        if (!c1 || !c2) return false;
+        const latDiff = Math.abs(c1.latitude - c2.latitude);
+        const lngDiff = Math.abs(c1.longitude - c2.longitude);
+        return latDiff < 0.0001 && lngDiff < 0.0001;
+    };
+
     const handleAction = async () => {
         setLoading(true);
         if (status === 'IDLE' || status === 'PICKUP') {
@@ -434,6 +456,13 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             // Pickup puede no estar en estado actualizado si venimos del buscador;
             // lo leemos de pickupCoords (ya fue seteado en el paso anterior).
             const origin = pickupCoords ?? { latitude: region.latitude, longitude: region.longitude };
+            
+            if (checkSameLocation(origin, destCoords)) {
+                showAlert("Ubicación inválida", "El origen y el destino no pueden ser el mismo lugar. Por favor, selecciona un destino diferente.");
+                setLoading(false);
+                return;
+            }
+
             setDestinationCoords(destCoords);
             await getAddressFromCoords(destCoords.latitude, destCoords.longitude, false);
             await getPrice(destCoords, origin);
@@ -499,14 +528,20 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             setPickupCoords(coords);
             setStatus('DESTINATION');
         } else {
-            setDestinationCoords(coords);
-
-            // Si el pickup aún no estaba fijado, usamos la posición actual del mapa.
-            // Guardamos la referencia local para pasársela a getPrice de inmediato,
-            // porque setPickupCoords es async y el estado no se actualiza en este ciclo.
             let effectivePickup = pickupCoords;
             if (!effectivePickup) {
                 effectivePickup = { latitude: region.latitude, longitude: region.longitude };
+            }
+
+            if (checkSameLocation(effectivePickup, coords)) {
+                showAlert("Ubicación inválida", "El origen y el destino no pueden ser el mismo lugar. Por favor, selecciona un destino diferente.");
+                destinationSearchRef.current?.setAddressText('');
+                return;
+            }
+
+            setDestinationCoords(coords);
+
+            if (!pickupCoords) {
                 setPickupCoords(effectivePickup);
                 getAddressFromCoords(effectivePickup.latitude, effectivePickup.longitude, true);
             }
@@ -731,7 +766,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         setPickupAddress('');
         setDestinationAddress('');
         setOtpValidate(false);
+        setInitialChatMessages([]);
         setActiveRideBackendStatus(null);
+        setUnreadCount(0);
         pickupSearchRef.current?.setAddressText('');
         destinationSearchRef.current?.setAddressText('');
         await AsyncStorage.removeItem('activeRideId');
@@ -779,7 +816,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 }}
             >
                 {/* Marcador del Conductor Animado (Para el Cliente) */}
-                {(status === 'ON_RIDE' || status === 'TO_DESTINO') && role === Roles.USER && driverLocation && driverLocation.latitude && driverLocation.longitude && (
+                {(status === 'ON_RIDE' || status === 'TO_DESTINO') && (role === Roles.USER || isDriverOffline) && driverLocation && driverLocation.latitude && driverLocation.longitude && (
                     <Marker.Animated
                         key="driver-marker"
                         coordinate={animatedDriverCoords as any}
@@ -801,7 +838,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 {pickupCoords && <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#1D4ED8" /></Marker>}
                 {destinationCoords && <Marker coordinate={destinationCoords} anchor={{ x: 0.5, y: 1 }}><Ionicons name="location" size={40} color="#EF4444" /></Marker>}
 
-                {role === Roles.USER && (status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocation && (
+                {(role === Roles.USER || isDriverOffline) && (status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocation && (
                     <MapViewDirections
                         origin={driverLocation} // Sale de donde está el carro actualmente
                         destination={status === 'ON_RIDE' ? pickupCoords : destinationCoords}
@@ -817,7 +854,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
                 {/* Renderizado de Rutas Inteligente */}
                 {(
-                    (status === 'ROUTE' && pickupCoords && destinationCoords) ||
+                    ((status === 'ROUTE' || status === 'SEARCHING') && pickupCoords && destinationCoords) ||
                     ((status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide)
                 ) && (
                         <MapViewDirections
@@ -970,6 +1007,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                     textInput: styles.searchInput,
                                     row: { padding: 13, height: 44, flexDirection: 'row' },
                                     separator: { height: 0.5, backgroundColor: '#F3F4F6' },
+                                    description: { color: '#000000' },
                                 }}
                                 enablePoweredByContainer={false}
                                 keyboardShouldPersistTaps="handled"
@@ -1024,6 +1062,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                     textInput: styles.searchInput,
                                     row: { padding: 13, height: 44, flexDirection: 'row' },
                                     separator: { height: 0.5, backgroundColor: '#F3F4F6' },
+                                    description: { color: '#000000' },
                                 }}
                                 enablePoweredByContainer={false}
                                 keyboardShouldPersistTaps="handled"
@@ -1116,9 +1155,19 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                             {isChatEnabledRideStatus(activeRideBackendStatus) && (
                                 <TouchableOpacity
                                     style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
-                                    onPress={() => setIsChatVisible(true)}
+                                    onPress={() => {
+                                        setUnreadCount(0);
+                                        setIsChatVisible(true);
+                                    }}
                                 >
-                                    <Ionicons name="chatbubbles" size={20} color="white" />
+                                    <View style={{ position: 'relative' }}>
+                                        <Ionicons name="chatbubbles" size={20} color="white" />
+                                        {unreadCount > 0 && (
+                                            <View style={styles.chatBadgeCount}>
+                                                <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                            </View>
+                                        )}
+                                    </View>
                                     <Text style={styles.btnText}>Chat con Conductor</Text>
                                 </TouchableOpacity>
                             )}
@@ -1135,7 +1184,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 )}
             </View>
 
-            {status === 'ON_RIDE' && role === Roles.USER && (
+            {status === 'ON_RIDE' && (role === Roles.USER || isDriverOffline) && (
                 <View style={styles.bottomContainer}>
                     <View style={styles.confirmCard}>
                         <Text style={[styles.statusLabel, { color: '#10B981' }]}>EL CONDUCTOR ESTÁ EN CAMINO</Text>
@@ -1155,9 +1204,19 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
                             <TouchableOpacity
                                 style={[styles.btnConfirm, { backgroundColor: '#10B981', marginTop: 15, flexDirection: 'row', justifyContent: 'center', gap: 10 }]}
-                                onPress={() => setIsChatVisible(true)}
+                                onPress={() => {
+                                    setUnreadCount(0);
+                                    setIsChatVisible(true);
+                                }}
                             >
-                                <Ionicons name="chatbubbles" size={20} color="white" />
+                                <View style={{ position: 'relative' }}>
+                                    <Ionicons name="chatbubbles" size={20} color="white" />
+                                    {unreadCount > 0 && (
+                                        <View style={styles.chatBadgeCount}>
+                                            <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                        </View>
+                                    )}
+                                </View>
                                 <Text style={styles.btnText}>Chat con Conductor</Text>
                             </TouchableOpacity>
                         )}
@@ -1173,6 +1232,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 rideId={currentRideId}
                 userId={userId}
                 initialMessages={initialChatMessages}
+                onNewMessage={() => {
+                    if (!isChatVisible) {
+                        setUnreadCount(prev => prev + 1);
+                    }
+                }}
             />
 
             <RatingModal
@@ -1479,5 +1543,25 @@ const styles = StyleSheet.create({
         letterSpacing: 20, // Más espacio entre números
         marginVertical: 20,
         color: '#1E3A8A'
+    },
+    chatBadgeCount: {
+        position: 'absolute',
+        top: -6,
+        right: -10,
+        backgroundColor: '#EF4444',
+        borderRadius: 9,
+        minWidth: 18,
+        height: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: 'white',
+    },
+    chatBadgeText: {
+        color: 'white',
+        fontSize: 9,
+        fontWeight: 'bold',
+        textAlign: 'center',
     }
 });

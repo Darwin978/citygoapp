@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -10,7 +10,7 @@ import LoginScreen from './src/screens/LoginScreen';
 const Stack = createNativeStackNavigator();
 
 import * as Notifications from 'expo-notifications';
-import { Linking, Platform, TouchableOpacity, View, Text, AppState, Alert, PermissionsAndroid } from 'react-native';
+import { Linking, Platform, TouchableOpacity, View, Text, AppState, Alert, PermissionsAndroid, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from './utils/context/AuthContext';
 import TerminosScreen from './src/components/TerminosCondiciones';
@@ -49,6 +49,7 @@ const MSG_CHANNEL_ID = 'messages-channel';
 const STATUS_CHANNEL_ID = 'status-channel';
 const RIDE_DEEPLINK_PREFIX = 'citygo://ride';
 const ACCEPT_RIDE_ACTION_ID = 'accept_ride';
+const REJECT_RIDE_ACTION_ID = 'reject_ride';
 const VIEW_RIDE_ACTION_ID = 'view_ride';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,7 +176,7 @@ async function showRideNotification(
           // @notifee NO hereda el icono del meta-data del manifest; hay que declararlo
           // explícitamente. Usamos el mismo drawable que usa expo-notifications:
           // android/app/src/main/res/drawable/ic_notification.png
-          smallIcon: 'ic_notification',
+          smallIcon: 'notification_icon',
           color: '#1D4ED8',
           // Categoría CALL: el sistema trata la notificación como una llamada entrante
           // y le da prioridad máxima en la pantalla de bloqueo
@@ -206,6 +207,12 @@ async function showRideNotification(
                 title: 'Aceptar',
                 pressAction: {
                   id: ACCEPT_RIDE_ACTION_ID,
+                },
+              },
+              {
+                title: 'Rechazar',
+                pressAction: {
+                  id: REJECT_RIDE_ACTION_ID,
                 },
               },
               {
@@ -371,6 +378,10 @@ async function acceptRideFromNotification(rideId: string) {
     await AsyncStorage.setItem('activeRideId', rideId);
     await AsyncStorage.removeItem('pendingNotifAction');
     await AsyncStorage.removeItem('pendingNotifType');
+    
+    // Emitir evento para que las pantallas activas (como DriverHomeScreen) se enteren de que la carrera fue aceptada
+    DeviceEventEmitter.emit('RIDE_ACCEPTED_FROM_NOTIF', { rideId });
+    
     return true;
   } catch (error) {
     await AsyncStorage.setItem('pendingNotifAction', ACCEPT_RIDE_ACTION_ID);
@@ -398,9 +409,10 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
   const title = (data.title as string) ?? 'CityGo';
   const body = (data.body as string) ?? '';
 
-  // Almacenar el rideId para que restoreSession lo encuentre al abrir la app
+  // Almacenar rideId y tipo para que restoreSession los encuentre al abrir la app
   if (rideId) {
     await AsyncStorage.setItem('activeRideId', String(rideId));
+    await AsyncStorage.setItem('pendingNotifType', type);
   }
 
   if (Platform.OS === 'android') {
@@ -410,6 +422,9 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
       // NEW_RIDE → conductor recibe FSI con solicitud de carrera
       // ARRIVED  → cliente recibe FSI cuando el conductor ya está esperando afuera
       await showRideNotification(title, body, rideId, type);
+      
+      // Abrir la app automáticamente para mostrar la carrera o la llegada en pantalla completa (requiere permiso de overlay)
+      Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
     } else if (type === 'MESSAGE') {
       await showSimpleNotification(title, body, MSG_CHANNEL_ID);
     } else {
@@ -425,41 +440,91 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 // la app está en background (tap en la notificación, botón de acción, etc.).
 // ─────────────────────────────────────────────────────────────────────────────
 notifee.onBackgroundEvent(async ({ type, detail }) => {
-  if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
-    const rideId = detail.notification?.data?.rideId as string | undefined;
-    const notifType = detail.notification?.data?.type as string | undefined;
-    const actionId = detail.pressAction?.id;
-    if (rideId) {
-      await AsyncStorage.setItem('activeRideId', rideId);
-      if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
-      if (actionId === ACCEPT_RIDE_ACTION_ID) {
-        await acceptRideFromNotification(rideId);
-      }
-      Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
-    }
-  }
-});
+  const isPressEvent   = type === EventType.PRESS;
+  const isActionPress  = type === EventType.ACTION_PRESS;
+  if (!isPressEvent && !isActionPress) return;
 
-// El botón "Aceptar" debe funcionar incluso si la app ya está abierta y la
-// pantalla del conductor todavía no procesó el evento local.
-notifee.onForegroundEvent(async ({ type, detail }) => {
-  if (type !== EventType.ACTION_PRESS) return;
-  const rideId = detail.notification?.data?.rideId as string | undefined;
-  const notifType = detail.notification?.data?.type as string | undefined;
-  const actionId = detail.pressAction?.id;
+  const rideId    = detail.notification?.data?.rideId    as string | undefined;
+  const notifType = detail.notification?.data?.type      as string | undefined;
+  const actionId  = detail.pressAction?.id;
 
   if (!rideId) return;
 
-  await AsyncStorage.setItem('activeRideId', rideId);
-  if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
+  if (isActionPress) {
+    if (actionId === ACCEPT_RIDE_ACTION_ID) {
+      await AsyncStorage.setItem('activeRideId', rideId);
+      if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
 
-  if (actionId === ACCEPT_RIDE_ACTION_ID) {
-    await acceptRideFromNotification(rideId);
-    if (detail.notification?.id) {
-      await notifee.cancelNotification(detail.notification.id);
+      await acceptRideFromNotification(rideId);
+      if (detail.notification?.id) {
+        await notifee.cancelNotification(detail.notification.id);
+      }
+      // Al aceptar la carrera en segundo plano, sí debemos abrir la app para que el conductor vea el mapa y ruta
+      Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
+      return;
+    }
+    if (actionId === REJECT_RIDE_ACTION_ID) {
+      // Limpiar cualquier dato temporal de este viaje rechazado
+      await AsyncStorage.removeItem('activeRideId');
+      await AsyncStorage.removeItem('pendingNotifType');
+      
+      if (detail.notification?.id) {
+        await notifee.cancelNotification(detail.notification.id);
+      }
+      // Emitir evento para descartar el diálogo si la app está en memoria
+      DeviceEventEmitter.emit('RIDE_REJECTED_FROM_NOTIF', { rideId });
+      return; // no abrir la app, el conductor rechazó la notificación
     }
   }
 
+  // Tocar el cuerpo de la notificación (PRESS) o "Ver carrera" -> Guardar datos y abrir app
+  await AsyncStorage.setItem('activeRideId', rideId);
+  if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
+  Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
+});
+
+// Handler foreground unificado para notifee:
+//   PRESS        → el usuario toca la notificación → abrir app en el viaje/chat
+//   ACTION_PRESS → el usuario toca el botón "Aceptar" o "Rechazar" sin abrir la app
+notifee.onForegroundEvent(async ({ type, detail }) => {
+  const isPressEvent   = type === EventType.PRESS;
+  const isActionPress  = type === EventType.ACTION_PRESS;
+  if (!isPressEvent && !isActionPress) return;
+
+  const rideId    = detail.notification?.data?.rideId    as string | undefined;
+  const notifType = detail.notification?.data?.type      as string | undefined;
+  const actionId  = detail.pressAction?.id;
+
+  if (!rideId) return;
+
+  if (isActionPress) {
+    if (actionId === ACCEPT_RIDE_ACTION_ID) {
+      await AsyncStorage.setItem('activeRideId', rideId);
+      if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
+
+      await acceptRideFromNotification(rideId);
+      if (detail.notification?.id) {
+        await notifee.cancelNotification(detail.notification.id);
+      }
+      return; // no abrir la app, el conductor ya aceptó desde la notificación
+    }
+    if (actionId === REJECT_RIDE_ACTION_ID) {
+      // Limpiar datos
+      await AsyncStorage.removeItem('activeRideId');
+      await AsyncStorage.removeItem('pendingNotifType');
+      
+      if (detail.notification?.id) {
+        await notifee.cancelNotification(detail.notification.id);
+      }
+      // Emitir evento para descartar el diálogo
+      DeviceEventEmitter.emit('RIDE_REJECTED_FROM_NOTIF', { rideId });
+      return; // no abrir la app, el conductor rechazó la notificación
+    }
+  }
+
+  // Tocar el cuerpo de la notificación (PRESS) o "Ver carrera" -> Guardar datos y abrir app
+  await AsyncStorage.setItem('activeRideId', rideId);
+  if (notifType) await AsyncStorage.setItem('pendingNotifType', notifType);
   Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
 });
 
@@ -491,24 +556,20 @@ function WithoutLogin() {
 // ROOT NAVIGATOR — lógica de permisos, tokens FCM y ubicación en background
 // ─────────────────────────────────────────────────────────────────────────────
 function RootNavigator() {
-  const { isLoggedIn, isApproved } = useAuth();
+  const { isLoggedIn, isApproved, isAuthReady } = useAuth();
   const {
     termsAccepted,
     requestPermissions,
     requestBackgroundLocationPermission,
     locationGranted,
+    permissionsReady,
     requestOverlayPermission,
     requestBatteryAndMiuiPermissions,
   } = usePermissions();
 
-  const [showSplash, setShowSplash] = useState(true);
-  const [permissionsSettled, setPermissionsSettled] = useState(false);
-
-  // ── Ocultar splash ──────────────────────────────────────────────────────
+  // ── Ocultar splash nativo lo antes posible ──────────────────────────────
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => { });
-    const t = setTimeout(() => setShowSplash(false), 3000);
-    return () => clearTimeout(t);
   }, []);
 
   // ── Crear canales @notifee al arrancar ──────────────────────────────────
@@ -544,30 +605,29 @@ function RootNavigator() {
 
   // ── Permisos + token FCM ─────────────────────────────────────────────────
   useEffect(() => {
-    if (showSplash) return;
+    if (!isAuthReady || !permissionsReady) return;
 
     let isMounted = true;
     const initPermissions = async () => {
-      setPermissionsSettled(false);
-
       // 1. Ubicación en primer plano (necesaria para todos)
       await requestPermissions();
 
       if (isLoggedIn) {
-        // 2. Notificaciones push + token FCM
-        await registerForPushNotificationsAsync(true);
-        // 3. Overlay (mostrar sobre otras apps) + USE_FULL_SCREEN_INTENT (Android 14+)
-        await requestOverlayPermission();
+        // 2. Notificaciones push (POST_NOTIFICATIONS en Android 13+) — crítico
+        try { await registerForPushNotificationsAsync(true); } catch (_e) { }
 
-        // 4. Exención de batería + permisos MIUI/HyperOS (solo conductores;
-        //    son los que reciben FSI y necesitan estas restricciones desactivadas)
+        // 3. Mostrar sobre otras apps (overlay)
+        try { await requestOverlayPermission(); } catch (_e) { }
+
         const role = await AsyncStorage.getItem('role');
         if (role === 'DRIVER') {
-          await requestBatteryAndMiuiPermissions();
-          await requestBackgroundLocationPermission();
+          // 4. Ubicación en segundo plano
+          try { await requestBackgroundLocationPermission(); } catch (_e) { }
+          // 5. Batería / MIUI (Xiaomi) — última porque abre ajustes del sistema
+          try { await requestBatteryAndMiuiPermissions(); } catch (_e) { }
         }
 
-        // 5. Verificar en runtime que USE_FULL_SCREEN_INTENT sigue activo
+        // Verificar en runtime que USE_FULL_SCREEN_INTENT sigue activo.
         //    (el usuario puede haberlo desactivado después de instalación).
         //    Solo aplica Android 14+ (API 34); en versiones anteriores el valor
         //    será NOT_SUPPORTED y lo ignoramos.
@@ -604,8 +664,6 @@ function RootNavigator() {
           }
         }
       }
-
-      if (isMounted) setPermissionsSettled(true);
     };
 
     initPermissions();
@@ -649,18 +707,27 @@ function RootNavigator() {
     }
 
     return () => { isMounted = false; };
-  }, [isLoggedIn, showSplash]);
+  }, [isAuthReady, permissionsReady, isLoggedIn]);
 
   // ── Ubicación en segundo plano (foreground service) ──────────────────────
   // Inicia la tarea LOCATION_TASK (definida en index.ts) que envía la posición
   // al backend via REST cada ~15 s incluso con la pantalla apagada.
   // Solo se inicia para conductores con los permisos correctos.
   useEffect(() => {
+    let appStateSubscription: any = null;
+
     const startBackgroundLocation = async () => {
       if (!isLoggedIn || !locationGranted) return;
 
       const role = await AsyncStorage.getItem('role');
       if (role !== 'DRIVER') return;
+
+      // Android: No se puede iniciar un foreground service desde el background.
+      // Verificamos que la app esté realmente en primer plano ('active').
+      if (AppState.currentState !== 'active') {
+        console.log('[BG-LOCATION] La aplicación no está activa (AppState:', AppState.currentState, '), aplazando el inicio de LOCATION_TASK.');
+        return;
+      }
 
       try {
         const hasStarted = await Location.hasStartedLocationUpdatesAsync('LOCATION_TASK');
@@ -691,10 +758,23 @@ function RootNavigator() {
     };
 
     startBackgroundLocation();
+
+    // Escuchar cambios de estado para iniciar el servicio en cuanto la app pase a estar en primer plano
+    appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        startBackgroundLocation();
+      }
+    });
+
+    return () => {
+      if (appStateSubscription) {
+        appStateSubscription.remove();
+      }
+    };
   }, [isLoggedIn, locationGranted]);
 
   // ── Pantallas de espera / error ──────────────────────────────────────────
-  if (showSplash || !permissionsSettled) {
+  if (!isAuthReady || !permissionsReady) {
     return <LoadingScreen />;
   }
 

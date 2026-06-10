@@ -10,24 +10,30 @@ interface ChatModalProps {
   rideId: string | null;
   userId: string | null;
   initialMessages?: any[];
+  onNewMessage?: () => void;
 }
 
-export default function ChatModal({ visible, onClose, socket, rideId, userId, initialMessages = [] }: ChatModalProps) {
+export default function ChatModal({ visible, onClose, socket, rideId, userId, initialMessages = [], onNewMessage }: ChatModalProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
 
+  const onNewMessageRef = useRef(onNewMessage);
   useEffect(() => {
-    if (initialMessages && initialMessages.length > 0) {
-      setMessages(initialMessages.map((payload) => ({
+    onNewMessageRef.current = onNewMessage;
+  }, [onNewMessage]);
+
+  useEffect(() => {
+    setMessages(
+      (initialMessages || []).map((payload) => ({
         id: payload.id || Math.random().toString(),
         text: payload.text,
         sender: payload.senderId === userId ? 'me' : 'other',
         time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      })));
-    }
-  }, [initialMessages, userId]);
+      }))
+    );
+  }, [initialMessages, rideId, userId]);
 
   useEffect(() => {
     if (!socket || !rideId || !userId) return;
@@ -46,6 +52,9 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
       setMessages((prev) => {
         // Evitar mensajes duplicados
         if (prev.some(m => m.id === incomingMsg.id)) return prev;
+        if (!isMe && onNewMessageRef.current) {
+          onNewMessageRef.current();
+        }
         return [...prev, incomingMsg];
       });
       

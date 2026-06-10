@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 interface AuthContextProps {
   isLoggedIn: boolean;
   isApproved: boolean;
+  isAuthReady: boolean;
   setIsLoggedIn: (value: boolean) => void;
     logout: () => Promise<void>;
   login: () => Promise<void>;
@@ -13,6 +14,7 @@ interface AuthContextProps {
 const AuthContext = createContext<AuthContextProps>({
   isLoggedIn: false,
   isApproved: false,
+  isAuthReady: false,
   setIsLoggedIn: () => {},
     logout: async () => { },
   login: async () => { },
@@ -22,11 +24,13 @@ const AuthContext = createContext<AuthContextProps>({
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isApproved, setIsApproved] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   useEffect(() => {
     (async () => {
         const token = await AsyncStorage.getItem('authToken');
       setIsLoggedIn(!!token);
+      setIsAuthReady(true);
     })();
   }, []);
 
@@ -41,7 +45,7 @@ const logout = async () => {
   const aproveed = async (status: boolean) => setIsApproved(status);
 
   return (
-    <AuthContext.Provider value={{ isLoggedIn, isApproved, setIsLoggedIn, logout, login, aproveed }}>
+    <AuthContext.Provider value={{ isLoggedIn, isApproved, isAuthReady, setIsLoggedIn, logout, login, aproveed }}>
       {children}
     </AuthContext.Provider>
   );

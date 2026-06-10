@@ -60,31 +60,37 @@ module.exports = function withNotificationIcon(config) {
       app["meta-data"] = [];
     }
 
-    app["meta-data"].push({
-      $: {
-        "android:name":
-          "com.google.firebase.messaging.default_notification_icon",
-        "android:resource": "@drawable/ic_notification",
-        "tools:replace": "android:resource",
-      },
-    });
+    // 2.1 Actualizar o agregar el metadato del icono
+    const iconMetaData = app["meta-data"].find(
+      (m) => m.$["android:name"] === "com.google.firebase.messaging.default_notification_icon"
+    );
+    if (iconMetaData) {
+      iconMetaData.$["android:resource"] = "@drawable/ic_notification";
+      iconMetaData.$["tools:replace"] = "android:resource";
+    } else {
+      app["meta-data"].push({
+        $: {
+          "android:name": "com.google.firebase.messaging.default_notification_icon",
+          "android:resource": "@drawable/ic_notification",
+          "tools:replace": "android:resource",
+        },
+      });
+    }
 
+    // 2.2 Actualizar o agregar el metadato del color
     const colorMetaData = app["meta-data"].find(
       (m) => m.$["android:name"] === "com.google.firebase.messaging.default_notification_color"
     );
     if (colorMetaData) {
-      if (colorMetaData.$["tools:replace"]) {
-        colorMetaData.$["tools:replace"] += ",android:resource";
-      } else {
-        colorMetaData.$["tools:replace"] = "android:resource";
-      }
+      colorMetaData.$["android:resource"] = "@color/notification_icon_color";
+      colorMetaData.$["tools:replace"] = "android:resource";
     } else {
       app["meta-data"].push({
         $: {
           "android:name": "com.google.firebase.messaging.default_notification_color",
           "android:resource": "@color/notification_icon_color",
-          "tools:replace": "android:resource"
-        }
+          "tools:replace": "android:resource",
+        },
       });
     }
 
