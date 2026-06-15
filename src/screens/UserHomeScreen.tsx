@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking } from 'react-native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -62,6 +62,8 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     const [showRequestDialog, setShowRequestDialog] = useState<boolean>(false);
     const [pendingRequest, setPendingRequest] = useState<any>(null);
     const [activeRequestRide, setActiveRequestRide] = useState<any>(null);
+    const [reference, setReference] = useState('');
+    const [searchingTimeLeft, setSearchingTimeLeft] = useState(60);
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [optValue, setOptvalue] = useState('');
     const [otpCode, setOtpCode] = useState('');
@@ -201,7 +203,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
                 setDriverInfo({
                     name: data.driverName,
-                    vehicle: data.driverVehicle,
+                    vehicle: data.vehicle || { plate: data.driverVehicle },
                 });
                 setDriverLocation(data.currentLocation);
                 setActiveRideBackendStatus('ACCEPTED');
@@ -297,6 +299,23 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 );
             });
 
+            socket.current.on('ride_timeout', async (data: any) => {
+                console.log("Ride timeout event received:", data);
+                showAlert("Viaje no aceptado", data.message || "No se encontraron conductores. Por favor, vuelve a solicitar la carrera.");
+
+                setCurrentRideId(null);
+                setActiveRequestRide(null);
+                setPendingRequest(null);
+                setDriverInfo(null);
+                setOtpValidate(false);
+                setInitialChatMessages([]);
+                setActiveRideBackendStatus(null);
+                setUnreadCount(0);
+                await AsyncStorage.removeItem('activeRideId');
+
+                setStatus('ROUTE'); // Volver a la pantalla de confirmación
+            });
+
             socket.current.on('ride_finished', async (data: any) => {
                 const finishedRideId = data?.rideId || currentRideIdRef.current;
                 if (finishedRideId && ratingShownForRideRef.current === finishedRideId) return;
@@ -339,7 +358,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     useEffect(() => {
         const restoreSession = async () => {
             const savedRideId = await AsyncStorage.getItem('activeRideId');
-            const notifType   = await AsyncStorage.getItem('pendingNotifType');
+            const notifType = await AsyncStorage.getItem('pendingNotifType');
             await AsyncStorage.removeItem('pendingNotifType');
 
             // ── Notificación de MENSAJE: abrir chat si la carrera sigue activa ─
@@ -434,6 +453,37 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         // refrescar cada 10 seg
     }, [activeRequestRide])
 
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (status === 'SEARCHING') {
+            const calculateInitialTime = () => {
+                let initialTime = 60;
+                if (activeRequestRide?.ride?.createdAt) {
+                    const createdTime = new Date(activeRequestRide.ride.createdAt).getTime();
+                    const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
+                    initialTime = Math.max(0, 60 - diffSeconds);
+                }
+                setSearchingTimeLeft(initialTime);
+            };
+            calculateInitialTime();
+
+            interval = setInterval(() => {
+                setSearchingTimeLeft(prev => {
+                    if (prev <= 1) {
+                        clearInterval(interval);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        } else {
+            setSearchingTimeLeft(60);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [status, activeRequestRide]);
+
     // --- FUNCIONES DE APOYO ---
 
     const checkSameLocation = (c1: any, c2: any) => {
@@ -456,7 +506,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             // Pickup puede no estar en estado actualizado si venimos del buscador;
             // lo leemos de pickupCoords (ya fue seteado en el paso anterior).
             const origin = pickupCoords ?? { latitude: region.latitude, longitude: region.longitude };
-            
+
             if (checkSameLocation(origin, destCoords)) {
                 showAlert("Ubicación inválida", "El origen y el destino no pueden ser el mismo lugar. Por favor, selecciona un destino diferente.");
                 setLoading(false);
@@ -490,9 +540,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 components.find((c: any) => (c.types as string[]).includes(type))?.long_name ?? '';
 
             const streetNumber = get('street_number');
-            const route        = get('route');
+            const route = get('route');
             const neighborhood = get('neighborhood') || get('sublocality_level_1') || get('sublocality');
-            const city         = get('locality') || get('administrative_area_level_2');
+            const city = get('locality') || get('administrative_area_level_2');
 
             let addr = '';
             if (route) {
@@ -672,6 +722,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         centerOnUserLocation();
         setOtpValidate(false);
         setInitialChatMessages([]);
+        setReference('');
     };
 
     const handleRequestRide = async () => {
@@ -684,8 +735,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 originLng: pickupCoords.longitude,
                 destLat: destinationCoords.latitude,
                 destLng: destinationCoords.longitude,
-                finalPrice: price,
+                finalPrice: paymentMethod === 'CARD' ? parseFloat((price / 0.9425).toFixed(2)) : price,
                 paymentMethod,
+                reference: reference.trim() || undefined,
             }
             console.log("Data enviada:", data);
             const response = await requestRideApi(data);
@@ -773,6 +825,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         destinationSearchRef.current?.setAddressText('');
         await AsyncStorage.removeItem('activeRideId');
         centerOnUserLocation();
+        setReference('');
     };
 
     const handleSendRating = async (score: number, comment: string) => {
@@ -1099,6 +1152,17 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 </TouchableOpacity>
             )}
 
+            {/* Soporte WhatsApp */}
+            <TouchableOpacity
+                style={[styles.whatsappSupportBtn, { bottom: insets.bottom + 160 }]}
+                onPress={() => {
+                    const url = "https://wa.me/+593995580333/?text=Hola%20necesito%20soporte%20con%20mi%20app%20CityGo";
+                    Linking.openURL(url);
+                }}
+            >
+                <Ionicons name="logo-whatsapp" size={28} color="white" />
+            </TouchableOpacity>
+
             {/* Botón de Acción Principal / Card de Precio */}
             <View style={[styles.bottomContainer, { bottom: insets.bottom + 0 }]}>
                 {status === 'SEARCHING' ? (
@@ -1106,6 +1170,12 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         <ActivityIndicator size="large" color="#1D4ED8" style={{ marginBottom: 15 }} />
                         <Text style={styles.searchingTitle}>Buscando conductor...</Text>
                         <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
+
+                        <View style={styles.progressBarContainer}>
+                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 60) * 100}%` }]} />
+                        </View>
+                        <Text style={styles.countdownText}>Tiempo restante: {searchingTimeLeft} seg</Text>
+
                         <TouchableOpacity
                             style={styles.btnCancelSearch}
                             onPress={() => handleCancelSolicitud()}
@@ -1115,9 +1185,32 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                     </View>
                 ) : status === 'ROUTE' ? (
                     <View style={styles.confirmCard}>
-                        <Text style={styles.priceText}>${price.toFixed(2)}</Text>
+                        {/* Display Cash and Card price dynamically */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                            <View>
+                                <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '600' }}>Efectivo</Text>
+                                <Text style={[styles.priceText, paymentMethod === 'CARD' && { color: '#9CA3AF', fontSize: 24 }]}>
+                                    ${(price || 0).toFixed(2)}
+                                </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '600' }}>Tarjeta</Text>
+                                <Text style={[styles.priceText, paymentMethod === 'CASH' && { color: '#9CA3AF', fontSize: 24 }]}>
+                                    ${((price || 0) / 0.9425).toFixed(2)}
+                                </Text>
+                            </View>
+                        </View>
                         <Text style={styles.distanceText}>{distance}</Text>
                         <Text style={styles.timeText}>{error ? error : time}</Text>
+
+                        {/* Referencia de ubicación (Opcional) */}
+                        <TextInput
+                            style={styles.referenceInput}
+                            placeholder="Referencia de ubicación (Ej: casa negra, portón rojo)"
+                            placeholderTextColor="#9CA3AF"
+                            value={reference}
+                            onChangeText={setReference}
+                        />
 
                         {/* Opciones de Pago */}
                         <View style={styles.paymentContainer}>
@@ -1126,14 +1219,18 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                 onPress={() => setPaymentMethod('CASH')}
                             >
                                 <Ionicons name="cash-outline" size={20} color={paymentMethod === 'CASH' ? 'white' : '#1D4ED8'} />
-                                <Text style={[styles.paymentText, paymentMethod === 'CASH' && styles.paymentTextActive]}>Efectivo</Text>
+                                <Text style={[styles.paymentText, paymentMethod === 'CASH' && styles.paymentTextActive]}>
+                                    Efectivo (${(price || 0).toFixed(2)})
+                                </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.paymentBtn, paymentMethod === 'CARD' && styles.paymentBtnActive]}
                                 onPress={() => setPaymentMethod('CARD')}
                             >
                                 <Ionicons name="card-outline" size={20} color={paymentMethod === 'CARD' ? 'white' : '#1D4ED8'} />
-                                <Text style={[styles.paymentText, paymentMethod === 'CARD' && styles.paymentTextActive]}>Tarjeta</Text>
+                                <Text style={[styles.paymentText, paymentMethod === 'CARD' && styles.paymentTextActive]}>
+                                    Tarjeta (${((price || 0) / 0.9425).toFixed(2)})
+                                </Text>
                             </TouchableOpacity>
                         </View>
 
@@ -1187,13 +1284,41 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             {status === 'ON_RIDE' && (role === Roles.USER || isDriverOffline) && (
                 <View style={styles.bottomContainer}>
                     <View style={styles.confirmCard}>
-                        <Text style={[styles.statusLabel, { color: '#10B981' }]}>EL CONDUCTOR ESTÁ EN CAMINO</Text>
-                        <View style={styles.clientInfoRow}>
-                            <Ionicons name="car" size={24} color="#10B981" />
-                            <Text style={styles.clientNameText}>
-                                Tu conductor llegará pronto
-                            </Text>
-                        </View>
+                        <Text style={[styles.statusLabel, { color: '#10B981' }]}>
+                            {activeRideBackendStatus === 'DRIVER_ARRIVED' ? 'EL CONDUCTOR HA LLEGADO' : 'EL CONDUCTOR ESTÁ EN CAMINO'}
+                        </Text>
+
+                        {activeRideBackendStatus === 'DRIVER_ARRIVED' ? (
+                            <View style={{ backgroundColor: '#F3F4F6', padding: 15, borderRadius: 15, marginBottom: 5 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                    <Ionicons name="person" size={20} color="#1D4ED8" />
+                                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1E3A8A', marginLeft: 10 }}>
+                                        {driverInfo?.name || 'Conductor'}
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                    <Ionicons name="car-sport" size={20} color="#1D4ED8" />
+                                    <Text style={{ fontSize: 14, color: '#374151', marginLeft: 10 }}>
+                                        {driverInfo?.vehicle?.brand || ''} {driverInfo?.vehicle?.model || ''} • {driverInfo?.vehicle?.color || ''}
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Ionicons name="card" size={20} color="#1D4ED8" />
+                                    <View style={{ backgroundColor: '#FEF08A', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginLeft: 10, borderWidth: 1, borderColor: '#FDE047' }}>
+                                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#854D0E', letterSpacing: 1 }}>
+                                            PLACA: {driverInfo?.vehicle?.plate || 'N/A'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+                        ) : (
+                            <View style={styles.clientInfoRow}>
+                                <Ionicons name="car" size={24} color="#10B981" />
+                                <Text style={styles.clientNameText}>
+                                    Tu conductor llegará pronto
+                                </Text>
+                            </View>
+                        )}
                         <Text style={{ textAlign: 'center', marginTop: 15, color: '#6B7280' }}>
                             Proporciona este código al conductor:
                         </Text>
@@ -1563,5 +1688,48 @@ const styles = StyleSheet.create({
         fontSize: 9,
         fontWeight: 'bold',
         textAlign: 'center',
+    },
+    referenceInput: {
+        height: 44,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        fontSize: 14,
+        color: '#374151',
+        marginBottom: 15,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    progressBarContainer: {
+        width: '100%',
+        height: 6,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 3,
+        overflow: 'hidden',
+        marginVertical: 15,
+    },
+    progressBar: {
+        height: '100%',
+        backgroundColor: '#1D4ED8',
+    },
+    countdownText: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#1E3A8A',
+        marginBottom: 15,
+        textAlign: 'center',
+    },
+    whatsappSupportBtn: {
+        position: 'absolute',
+        right: 20,
+        backgroundColor: '#25D366',
+        padding: 12,
+        borderRadius: 30,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        zIndex: 10,
     }
 });

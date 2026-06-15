@@ -64,6 +64,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     const [showRequestDialog, setShowRequestDialog] = useState<boolean>(false);
     const [pendingRequest, setPendingRequest] = useState<any>(null);
     const [activeRequestRide, setActiveRequestRide] = useState<any>(null);
+    const [reference, setReference] = useState('');
+    const [searchingTimeLeft, setSearchingTimeLeft] = useState(60);
+    const [driverTimeLeft, setDriverTimeLeft] = useState(60);
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [otpCode, setOtpCode] = useState('');
     const [otpValidate, setOtpValidate] = useState(false);
@@ -119,120 +122,149 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 auth: { token },
             });
 
-        socket.current.on('connect', async () => {
-            console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
+            socket.current.on('connect', async () => {
+                console.log("✅ Conectado al servidor de CityGo con ID:", socket.current.id);
 
-            if (role === Roles.DRIVER) {
-                console.log("Ingresa a getAvailableRides");
-                socket.current.emit('getAvailableRides', (rides: any[]) => {
-                    setAvailableRequests(rides);
-                });
-            }
+                if (role === Roles.DRIVER) {
+                    console.log("Ingresa a getAvailableRides");
+                    socket.current.emit('getAvailableRides', (rides: any[]) => {
+                        setAvailableRequests(rides);
+                    });
+                }
 
-            const activeRideId = currentRideIdRef.current || await AsyncStorage.getItem('activeRideId');
-            if (activeRideId) {
-                socket.current.emit('joinRide', activeRideId);
-            }
-        });
-
-        socket.current.on('newRideRequest', async (req: any) => {
-            console.log("Nueva solicitud de viaje:", req);
-
-            // NOTA: la notificación (sonido + vibración + Full Screen Intent) ya la
-            // muestra App.tsx a través del handler onMessage de Firebase.
-            // Aquí solo actualizamos el estado de la UI para mostrar el diálogo.
-
-            setAvailableRequests(prevRequests => {
-                const reqExists = prevRequests.some(r => r.tripId === req.tripId);
-                if (reqExists) return prevRequests;
-                return [...prevRequests, req];
+                const activeRideId = currentRideIdRef.current || await AsyncStorage.getItem('activeRideId');
+                if (activeRideId) {
+                    socket.current.emit('joinRide', activeRideId);
+                }
             });
 
-            // Opcional: mostrar el diálogo solo para la más reciente
-            setPendingRequest(req);
-            setShowRequestDialog(true);
+            socket.current.on('newRideRequest', async (req: any) => {
+                console.log("Nueva solicitud de viaje:", req);
 
-            // Traer la app al frente para mostrar el modal sobre otras apps
-            if (Platform.OS === 'android') {
-                Linking.openURL('citygo://').catch(err => console.log('Error opening app:', err));
-            }
-        });
+                // NOTA: la notificación (sonido + vibración + Full Screen Intent) ya la
+                // muestra App.tsx a través del handler onMessage de Firebase.
+                // Aquí solo actualizamos el estado de la UI para mostrar el diálogo.
 
-        socket.current.on('trip_accepted', (data: any) => {
-            socket.current.emit('joinRide', data.rideId);
-            setDriverInfo(data.driver);
-            setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
-            showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
-        });
+                setAvailableRequests(prevRequests => {
+                    const reqExists = prevRequests.some(r => r.tripId === req.tripId);
+                    if (reqExists) return prevRequests;
+                    return [...prevRequests, req];
+                });
 
-        socket.current.on('locationUpdated', (newCoords: any) => {
-            // Asegúrate de que el backend envíe 'latitude' y 'longitude'
-            const coords = {
-                latitude: newCoords.lat || newCoords.latitude,
-                longitude: newCoords.lng || newCoords.longitude,
-            };
+                // Opcional: mostrar el diálogo solo para la más reciente
+                setPendingRequest(req);
+                setShowRequestDialog(true);
 
-            if (Platform.OS === 'android') {
-                animatedDriverCoords.timing({
-                    ...coords,
-                    duration: 2000,
-                    useNativeDriver: false
-                } as any).start();
-            } else {
-                setDriverLocation(coords);
-            }
-        });
+                // Traer la app al frente para mostrar el modal sobre otras apps
+                if (Platform.OS === 'android') {
+                    Linking.openURL('citygo://').catch(err => console.log('Error opening app:', err));
+                }
+            });
 
-        socket.current.on('trip_taken', (data: { tripId: string }) => {
-            setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
-            if (pendingRequest?.tripId === data.tripId) {
-                setShowRequestDialog(false);
-                showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
-            }
-        });
+            socket.current.on('trip_accepted', (data: any) => {
+                socket.current.emit('joinRide', data.rideId);
+                setDriverInfo(data.driver);
+                setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
+                showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
+            });
 
-        socket.current.on('trip_completed_success', async () => {
-            // 1. Limpiar persistencia
-            await AsyncStorage.removeItem('activeRideId');
+            socket.current.on('locationUpdated', (newCoords: any) => {
+                // Asegúrate de que el backend envíe 'latitude' y 'longitude'
+                const coords = {
+                    latitude: newCoords.lat || newCoords.latitude,
+                    longitude: newCoords.lng || newCoords.longitude,
+                };
 
-            // 2. Resetear estados de la UI
-            setCurrentRideId(null);
-            setActiveRideBackendStatus(null);
-            setPendingRequest(null);
-            setInitialChatMessages([]);
-            setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
+                if (Platform.OS === 'android') {
+                    animatedDriverCoords.timing({
+                        ...coords,
+                        duration: 2000,
+                        useNativeDriver: false
+                    } as any).start();
+                } else {
+                    setDriverLocation(coords);
+                }
+            });
 
-            showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
-            
-            if (!isOnlineRef.current && onOffline) {
-                onOffline();
-            }
-        });
+            socket.current.on('trip_taken', (data: { tripId: string }) => {
+                setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
+                if (pendingRequest?.tripId === data.tripId) {
+                    setShowRequestDialog(false);
+                    showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                }
+            });
 
-        socket.current.on('driver_arrived', (data: any) => {
-            setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
-            showAlert("¡Conductor Llegando!", `El conductoe llego a recogerte, sal ahora!`);
-        });
+            socket.current.on('trip_completed_success', async () => {
+                // 1. Limpiar persistencia
+                await AsyncStorage.removeItem('activeRideId');
 
-        socket.current.on('ride_finished', async (data: any) => {
-            // 1. Limpiar persistencia
-            await AsyncStorage.removeItem('activeRideId');
+                // 2. Resetear estados de la UI
+                setCurrentRideId(null);
+                setActiveRideBackendStatus(null);
+                setPendingRequest(null);
+                setInitialChatMessages([]);
+                setStatus('IDLE'); // O 'PICKUP' según tu enum inicial
 
-            // 2. Resetear estados
-            setCurrentRideId(null);
-            setActiveRideBackendStatus(null);
-            setStatus('IDLE');
+                showAlert("Viaje Finalizado", "Ya puedes recibir nuevas solicitudes.");
 
-            // 3. Mostrar resumen (Podrías navegar a una pantalla de Rating/Calificación)
-            showAlert(
-                "¡Llegamos!",
-                `${data.finalPrice}`
-            );
-            
-            if (!isOnlineRef.current && onOffline) {
-                onOffline();
-            }
-        });
+                setReference('');
+
+                if (!isOnlineRef.current && onOffline) {
+                    onOffline();
+                }
+            });
+
+            socket.current.on('ride_timeout', async (data: any) => {
+                console.log("Ride timeout event received on driver screen:", data);
+
+                if (!isOnlineRef.current) {
+                    showAlert("Viaje no aceptado", data.message || "No se encontraron conductores. Por favor, vuelve a solicitar la carrera.");
+                    setCurrentRideId(null);
+                    setActiveRequestRide(null);
+                    setPendingRequest(null);
+                    setDriverInfo(null);
+                    setOtpValidate(false);
+                    setInitialChatMessages([]);
+                    setActiveRideBackendStatus(null);
+                    setUnreadCount(0);
+                    await AsyncStorage.removeItem('activeRideId');
+                    setStatus('ROUTE'); // Volver a la pantalla de confirmación
+                    setReference('');
+                } else {
+                    setAvailableRequests(prev => prev.filter(r => r.tripId !== data.rideId));
+                    if (pendingRequest?.tripId === data.rideId) {
+                        setShowRequestDialog(false);
+                        setPendingRequest(null);
+                    }
+                }
+            });
+
+            socket.current.on('driver_arrived', (data: any) => {
+                setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
+                showAlert("¡Conductor Llegando!", `El conductoe llego a recogerte, sal ahora!`);
+            });
+
+            socket.current.on('ride_finished', async (data: any) => {
+                // 1. Limpiar persistencia
+                await AsyncStorage.removeItem('activeRideId');
+
+                // 2. Resetear estados
+                setCurrentRideId(null);
+                setActiveRideBackendStatus(null);
+                setStatus('IDLE');
+
+                // 3. Mostrar resumen (Podrías navegar a una pantalla de Rating/Calificación)
+                showAlert(
+                    "¡Llegamos!",
+                    `${data.finalPrice}`
+                );
+
+                setReference('');
+
+                if (!isOnlineRef.current && onOffline) {
+                    onOffline();
+                }
+            });
 
         };
 
@@ -261,7 +293,70 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         destinationAddress: response.rideData?.destAddress || '',
         price: response.rideData?.finalPrice ?? 0,
         distance: response.rideData?.distance || '',
+        reference: response.rideData?.reference || '',
+        createdAt: response.rideData?.createdAt || response.ride?.createdAt || null,
     });
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (status === 'SEARCHING') {
+            const calculateInitialTime = () => {
+                let initialTime = 60;
+                if (activeRequestRide?.ride?.createdAt) {
+                    const createdTime = new Date(activeRequestRide.ride.createdAt).getTime();
+                    const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
+                    initialTime = Math.max(0, 60 - diffSeconds);
+                }
+                setSearchingTimeLeft(initialTime);
+            };
+            calculateInitialTime();
+
+            interval = setInterval(() => {
+                setSearchingTimeLeft(prev => {
+                    if (prev <= 1) {
+                        clearInterval(interval);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        } else {
+            setSearchingTimeLeft(60);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [status, activeRequestRide]);
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (showRequestDialog && pendingRequest) {
+            const calculateTime = () => {
+                const createdTime = pendingRequest.createdAt ? new Date(pendingRequest.createdAt).getTime() : Date.now();
+                const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
+                const remaining = Math.max(0, 60 - diffSeconds);
+                setDriverTimeLeft(remaining);
+                if (remaining <= 0) {
+                    setShowRequestDialog(false);
+                }
+            };
+            calculateTime();
+
+            interval = setInterval(() => {
+                setDriverTimeLeft(prev => {
+                    if (prev <= 1) {
+                        clearInterval(interval);
+                        setShowRequestDialog(false);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [showRequestDialog, pendingRequest]);
 
     const hydrateActiveRide = async (rideId: string, response: any, openChat = false) => {
         await AsyncStorage.setItem('activeRideId', rideId);
@@ -368,9 +463,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
 
     const restoreSession = async () => {
         // ── Leer contexto guardado por la notificación ───────────────────
-        const savedRideId   = await AsyncStorage.getItem('activeRideId');
-        const notifType     = await AsyncStorage.getItem('pendingNotifType');
-        const notifAction   = await AsyncStorage.getItem('pendingNotifAction');
+        const savedRideId = await AsyncStorage.getItem('activeRideId');
+        const notifType = await AsyncStorage.getItem('pendingNotifType');
+        const notifAction = await AsyncStorage.getItem('pendingNotifAction');
         await AsyncStorage.removeItem('pendingNotifType'); // consumir una sola vez
         await AsyncStorage.removeItem('pendingNotifAction'); // consumir una sola vez
 
@@ -781,6 +876,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         setDestinationAddress('');
         centerOnUserLocation();
         setOtpValidate(false);
+        setReference('');
     };
 
     const handleRequestRide = async () => {
@@ -793,8 +889,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 originLng: region.longitude,
                 destLat: destinationCoords.latitude,
                 destLng: destinationCoords.longitude,
-                finalPrice: price,
+                finalPrice: paymentMethod === 'CARD' ? parseFloat((price / 0.9425).toFixed(2)) : price,
                 paymentMethod,
+                reference: reference.trim() || undefined,
             }
             console.log("Data enviada:", data);
             const response = await requestRideApi(data);
@@ -1203,6 +1300,17 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 </TouchableOpacity>
             )}
 
+            {/* Soporte WhatsApp */}
+            <TouchableOpacity
+                style={[styles.whatsappSupportBtn, { bottom: insets.bottom + 160 }]}
+                onPress={() => {
+                    const url = "https://wa.me/+593995580333/?text=Hola%20necesito%20soporte%20con%20mi%20app%20CityGo";
+                    Linking.openURL(url);
+                }}
+            >
+                <Ionicons name="logo-whatsapp" size={28} color="white" />
+            </TouchableOpacity>
+
             {/* Botón de Acción Principal / Card de Precio */}
             <View style={[styles.bottomContainer, { bottom: insets.bottom + 0 }]}>
                 {status === 'SEARCHING' ? (
@@ -1210,6 +1318,12 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         <ActivityIndicator size="large" color="#1D4ED8" style={{ marginBottom: 15 }} />
                         <Text style={styles.searchingTitle}>Buscando conductor...</Text>
                         <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
+
+                        <View style={styles.progressBarContainer}>
+                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 60) * 100}%` }]} />
+                        </View>
+                        <Text style={styles.countdownText}>Tiempo restante: {searchingTimeLeft} seg</Text>
+
                         <TouchableOpacity
                             style={styles.btnCancelSearch}
                             onPress={() => handleCancelSolicitud()}
@@ -1219,9 +1333,32 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     </View>
                 ) : status === 'ROUTE' ? (
                     <View style={styles.confirmCard}>
-                        <Text style={styles.priceText}>${price.toFixed(2)}</Text>
+                        {/* Display Cash and Card price dynamically */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                            <View>
+                                <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '600' }}>Efectivo</Text>
+                                <Text style={[styles.priceText, paymentMethod === 'CARD' && { color: '#9CA3AF', fontSize: 24 }]}>
+                                    ${(price || 0).toFixed(2)}
+                                </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '600' }}>Tarjeta</Text>
+                                <Text style={[styles.priceText, paymentMethod === 'CASH' && { color: '#9CA3AF', fontSize: 24 }]}>
+                                    ${((price || 0) / 0.9425).toFixed(2)}
+                                </Text>
+                            </View>
+                        </View>
                         <Text style={styles.distanceText}>{distance}</Text>
                         <Text style={styles.timeText}>{error ? error : time}</Text>
+
+                        {/* Referencia de ubicación (Opcional) */}
+                        <TextInput
+                            style={styles.referenceInput}
+                            placeholder="Referencia de ubicación (Ej: casa negra, portón rojo)"
+                            placeholderTextColor="#9CA3AF"
+                            value={reference}
+                            onChangeText={setReference}
+                        />
 
                         {/* Opciones de Pago */}
                         <View style={styles.paymentContainer}>
@@ -1230,14 +1367,18 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                                 onPress={() => setPaymentMethod('CASH')}
                             >
                                 <Ionicons name="cash-outline" size={20} color={paymentMethod === 'CASH' ? 'white' : '#1D4ED8'} />
-                                <Text style={[styles.paymentText, paymentMethod === 'CASH' && styles.paymentTextActive]}>Efectivo</Text>
+                                <Text style={[styles.paymentText, paymentMethod === 'CASH' && styles.paymentTextActive]}>
+                                    Efectivo (${(price || 0).toFixed(2)})
+                                </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.paymentBtn, paymentMethod === 'CARD' && styles.paymentBtnActive]}
                                 onPress={() => setPaymentMethod('CARD')}
                             >
                                 <Ionicons name="card-outline" size={20} color={paymentMethod === 'CARD' ? 'white' : '#1D4ED8'} />
-                                <Text style={[styles.paymentText, paymentMethod === 'CARD' && styles.paymentTextActive]}>Tarjeta</Text>
+                                <Text style={[styles.paymentText, paymentMethod === 'CARD' && styles.paymentTextActive]}>
+                                    Tarjeta (${((price || 0) / 0.9425).toFixed(2)})
+                                </Text>
                             </TouchableOpacity>
                         </View>
 
@@ -1275,10 +1416,26 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
 
                         <Text style={[styles.searchingTitle, { color: '#10B981', textAlign: 'center', marginBottom: 5 }]}>¡Nueva Solicitud de Viaje!</Text>
 
+                        {/* Barra de progreso de expiración para el conductor */}
+                        <View style={styles.progressBarContainer}>
+                            <View style={[styles.progressBar, { width: `${(driverTimeLeft / 60) * 100}%`, backgroundColor: '#EF4444' }]} />
+                        </View>
+                        <Text style={{ textAlign: 'center', color: '#EF4444', fontWeight: 'bold', marginBottom: 10 }}>
+                            Expiración en: {driverTimeLeft}s
+                        </Text>
+
                         <View style={{ marginBottom: 10, marginTop: 10 }}>
                             <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Recogida:</Text>
                             <Text style={{ color: '#6B7280' }}>{pendingRequest.originAddress || 'Cargando...'}</Text>
                         </View>
+
+                        {pendingRequest.reference ? (
+                            <View style={{ marginBottom: 10, padding: 8, backgroundColor: '#FFF1F2', borderRadius: 8, borderWidth: 1, borderColor: '#FFE4E6' }}>
+                                <Text style={{ fontSize: 13, color: '#9F1239', fontWeight: 'bold' }}>
+                                    Referencia: <Text style={{ fontWeight: 'normal', color: '#4B5563' }}>{pendingRequest.reference}</Text>
+                                </Text>
+                            </View>
+                        ) : null}
 
                         <View style={{ marginBottom: 15 }}>
                             <Text style={{ fontWeight: 'bold', color: '#1E3A8A' }}>Destino:</Text>
@@ -1319,6 +1476,14 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             </Text>
                         </View>
 
+                        {pendingRequest?.reference ? (
+                            <View style={{ marginTop: 8, padding: 8, backgroundColor: '#FFF1F2', borderRadius: 8, borderWidth: 1, borderColor: '#FFE4E6', marginBottom: 10 }}>
+                                <Text style={{ fontSize: 13, color: '#9F1239', fontWeight: 'bold' }}>
+                                    Referencia de ubicación: <Text style={{ fontWeight: 'normal', color: '#4B5563' }}>{pendingRequest.reference}</Text>
+                                </Text>
+                            </View>
+                        ) : null}
+
                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
                             <TouchableOpacity
                                 style={[styles.btnConfirm, { backgroundColor: '#3B82F6', flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
@@ -1338,23 +1503,23 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         </View>
 
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
-                        <TouchableOpacity
-                            style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                            onPress={() => {
-                                setUnreadCount(0);
-                                setIsChatVisible(true);
-                            }}
-                        >
-                            <View style={{ position: 'relative' }}>
-                                <Ionicons name="chatbubbles" size={20} color="white" />
-                                {unreadCount > 0 && (
-                                    <View style={styles.chatBadgeCount}>
-                                        <Text style={styles.chatBadgeText}>{unreadCount}</Text>
-                                    </View>
-                                )}
-                            </View>
-                            <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                                onPress={() => {
+                                    setUnreadCount(0);
+                                    setIsChatVisible(true);
+                                }}
+                            >
+                                <View style={{ position: 'relative' }}>
+                                    <Ionicons name="chatbubbles" size={20} color="white" />
+                                    {unreadCount > 0 && (
+                                        <View style={styles.chatBadgeCount}>
+                                            <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                                <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
+                            </TouchableOpacity>
                         )}
 
                         <TouchableOpacity
@@ -1398,23 +1563,23 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         </View>
 
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
-                        <TouchableOpacity
-                            style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                            onPress={() => {
-                                setUnreadCount(0);
-                                setIsChatVisible(true);
-                            }}
-                        >
-                            <View style={{ position: 'relative' }}>
-                                <Ionicons name="chatbubbles" size={20} color="white" />
-                                {unreadCount > 0 && (
-                                    <View style={styles.chatBadgeCount}>
-                                        <Text style={styles.chatBadgeText}>{unreadCount}</Text>
-                                    </View>
-                                )}
-                            </View>
-                            <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.btnConfirm, { backgroundColor: '#1D4ED8', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                                onPress={() => {
+                                    setUnreadCount(0);
+                                    setIsChatVisible(true);
+                                }}
+                            >
+                                <View style={{ position: 'relative' }}>
+                                    <Ionicons name="chatbubbles" size={20} color="white" />
+                                    {unreadCount > 0 && (
+                                        <View style={styles.chatBadgeCount}>
+                                            <Text style={styles.chatBadgeText}>{unreadCount}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                                <Text style={styles.btnText}>CHAT CON PASAJERO</Text>
+                            </TouchableOpacity>
                         )}
 
                         <TouchableOpacity
@@ -1782,5 +1947,48 @@ const styles = StyleSheet.create({
         fontSize: 9,
         fontWeight: 'bold',
         textAlign: 'center',
+    },
+    referenceInput: {
+        height: 44,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        fontSize: 14,
+        color: '#374151',
+        marginBottom: 15,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    progressBarContainer: {
+        width: '100%',
+        height: 6,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 3,
+        overflow: 'hidden',
+        marginVertical: 15,
+    },
+    progressBar: {
+        height: '100%',
+        backgroundColor: '#1D4ED8',
+    },
+    countdownText: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#1E3A8A',
+        marginBottom: 15,
+        textAlign: 'center',
+    },
+    whatsappSupportBtn: {
+        position: 'absolute',
+        right: 20,
+        backgroundColor: '#25D366',
+        padding: 12,
+        borderRadius: 30,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        zIndex: 10,
     }
 });

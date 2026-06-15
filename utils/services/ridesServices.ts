@@ -11,6 +11,7 @@ interface requestRideDto {
     destLng: number,
     finalPrice: number,
     paymentMethod: 'CASH' | 'CARD',
+    reference?: string;
 }
 export async function requestRideApi(data: requestRideDto) {
     try {
