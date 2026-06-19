@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking, AppState } from 'react-native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import ChatModal from '../components/ChatModal';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/context/AuthContext';
+import { WebView } from 'react-native-webview';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import CarIcon from '../../assets/car_icon.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +16,7 @@ import { Roles } from '../../utils/services/rolesEnum';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import io from 'socket.io-client';
 import { BACKEND_URL } from '../../utils/services/apiConfig';
-import { cancelSolicitudApi, getActiveRideApi, getRideByIdApi, getPriceApi, requestRideApi } from '../../utils/services/ridesServices';
+import { cancelSolicitudApi, getActiveRideApi, getRideByIdApi, getPriceApi, requestRideApi, preparePaymentApi, getPaymentStatusApi } from '../../utils/services/ridesServices';
 import RatingModal from '../components/RatingModal';
 import { sendRatingApi, updateStatusDriverApi } from '../../utils/services/userService';
 import { coordsFromRideData, isActiveBackendRideStatus, isChatEnabledRideStatus, isTripInProgress, mapBackendStatusToPassengerScreen } from '../../utils/services/rideFlow';
@@ -63,7 +64,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     const [pendingRequest, setPendingRequest] = useState<any>(null);
     const [activeRequestRide, setActiveRequestRide] = useState<any>(null);
     const [reference, setReference] = useState('');
-    const [searchingTimeLeft, setSearchingTimeLeft] = useState(60);
+    const [searchingTimeLeft, setSearchingTimeLeft] = useState(600);
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [optValue, setOptvalue] = useState('');
     const [otpCode, setOtpCode] = useState('');
@@ -74,12 +75,51 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
     const [activeRideBackendStatus, setActiveRideBackendStatus] = useState<string | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+    const [isPreparingPayment, setIsPreparingPayment] = useState(false);
+    const [paymentId, setPaymentId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!currentRideId) {
             setUnreadCount(0);
         }
     }, [currentRideId]);
+
+    // Polling fallback para verificar estado de pago en caso de fallos de Sockets o redes
+    useEffect(() => {
+        let intervalId: any;
+
+        if (showPaymentModal && paymentId) {
+            intervalId = setInterval(async () => {
+                try {
+                    const statusRes = await getPaymentStatusApi(paymentId);
+                    if (statusRes && statusRes.status === 'PAID') {
+                        console.log("¡Pago exitoso detectado vía polling!", statusRes);
+                        setShowPaymentModal(false);
+                        setPaymentUrl(null);
+                        setPaymentId(null);
+                        setStatus('SEARCHING');
+                        showAlert("Pago Aprobado", "¡Tu pago con tarjeta ha sido procesado de manera exitosa! Iniciando búsqueda de conductor.");
+                    } else if (statusRes && statusRes.status === 'FAILED') {
+                        console.log("Pago fallido detectado vía polling!", statusRes);
+                        setShowPaymentModal(false);
+                        setPaymentUrl(null);
+                        setPaymentId(null);
+                        showAlert("Pago Rechazado", "La transacción con tarjeta fue rechazada o cancelada. Por favor, reintenta.");
+                    }
+                } catch (err) {
+                    console.error("Error polling payment status:", err);
+                }
+            }, 2000); // Polling cada 4 segundos
+        }
+
+        return () => {
+            if (intervalId) {
+                clearInterval(intervalId);
+            }
+        };
+    }, [showPaymentModal, paymentId]);
 
     // Animación del conductor (Para el cliente)
     const [driverLocation, setDriverLocation] = useState<any>(null);
@@ -138,7 +178,19 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         if (response.status === 'TO_RATING') {
             setStatus('TO_RATING');
             setActiveRideBackendStatus('TO_RATING');
-            setRatingModalVisible(true);
+            if (response.rideData?.paymentMethod === 'CARD' && response.rideData?.paymentStatus === 'PENDING') {
+                setShowPaymentModal(true);
+                setIsPreparingPayment(true);
+                preparePaymentApi(activeRideId).then(prepRes => {
+                    if (prepRes?.checkoutUrl) {
+                        setPaymentUrl(prepRes.checkoutUrl);
+                        setPaymentId(prepRes.paymentId);
+                    }
+                }).catch(err => console.error(err))
+                    .finally(() => setIsPreparingPayment(false));
+            } else {
+                setRatingModalVisible(true);
+            }
             return;
         }
 
@@ -245,11 +297,15 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setDriverLocation(coords);
             });
 
-            socket.current.on('trip_taken', (data: { tripId: string }) => {
+            socket.current.on('trip_taken', (data: { tripId: string, reason?: string }) => {
                 setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
                 if (pendingRequest?.tripId === data.tripId) {
                     setShowRequestDialog(false);
-                    showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                    if (data.reason === 'timeout') {
+                        showAlert("Viaje no disponible", "La solicitud de viaje ha expirado por tiempo.");
+                    } else {
+                        showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                    }
                 }
             });
 
@@ -336,11 +392,25 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 setActiveRideBackendStatus('TO_RATING');
                 centerOnUserLocation();
 
-                // 3. Mostrar resumen
                 showAlert(
                     "¡Llegamos! Esperamos que hayas tenido un buen viaje, no olvides calificar al conductor",
                 );
                 setRatingModalVisible(true);
+            });
+
+            socket.current.on('payment_success', (data: any) => {
+                console.log("¡Pago exitoso recibido via socket!", data);
+                setShowPaymentModal(false);
+                setPaymentUrl(null);
+
+                // Si el pago es exitoso al iniciar la carrera, comenzamos la búsqueda de conductores
+                setStatus('SEARCHING');
+                showAlert("Pago Aprobado", "¡Tu pago con tarjeta ha sido procesado de manera exitosa! Iniciando búsqueda de conductor.");
+            });
+
+            socket.current.on('payment_failed', (data: any) => {
+                console.log("Pago fallido recibido via socket!", data);
+                showAlert("Pago Rechazado", "La transacción con tarjeta fue rechazada o cancelada. Por favor, reintenta.");
             });
 
 
@@ -355,51 +425,67 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
     }, [userId, role]);
 
-    useEffect(() => {
-        const restoreSession = async () => {
-            const savedRideId = await AsyncStorage.getItem('activeRideId');
-            const notifType = await AsyncStorage.getItem('pendingNotifType');
-            await AsyncStorage.removeItem('pendingNotifType');
+    const restoreSession = async () => {
+        const savedRideId = await AsyncStorage.getItem('activeRideId');
+        const notifType = await AsyncStorage.getItem('pendingNotifType');
+        await AsyncStorage.removeItem('pendingNotifType');
 
-            // ── Notificación de MENSAJE: abrir chat si la carrera sigue activa ─
-            if (notifType === 'MESSAGE' && savedRideId) {
-                try {
-                    const response = await getRideByIdApi(savedRideId);
-                    if (response?.rideData && isChatEnabledRideStatus(response.status)) {
-                        await hydratePassengerRide(savedRideId, response);
-                        setUnreadCount(0);
-                        setIsChatVisible(true); // ← abrir chat directamente
-                    }
-                } catch (_e) { /* silenciar */ }
+        // ── Notificación de MENSAJE: abrir chat si la carrera sigue activa ─
+        if (notifType === 'MESSAGE' && savedRideId) {
+            try {
+                const response = await getRideByIdApi(savedRideId);
+                if (response?.rideData && isChatEnabledRideStatus(response.status)) {
+                    await hydratePassengerRide(savedRideId, response);
+                    setUnreadCount(0);
+                    setIsChatVisible(true); // ← abrir chat directamente
+                }
+            } catch (_e) { /* silenciar */ }
+            return;
+        }
+
+        try {
+            const response = await getActiveRideApi();
+            console.log("response getActiveRideApi", response);
+            if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
+                await AsyncStorage.removeItem('activeRideId');
                 return;
             }
 
-            try {
-                const response = await getActiveRideApi();
-                console.log("response getActiveRideApi", response);
-                if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
-                    await AsyncStorage.removeItem('activeRideId');
-                    return;
-                }
-
-                const activeRideId = response.rideData.tripId;
-                await hydratePassengerRide(activeRideId, response);
-            } catch (error) {
-                console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
-                const savedRideId2 = savedRideId ?? await AsyncStorage.getItem('activeRideId');
-                if (savedRideId2 && socket.current) {
-                    socket.current.emit('getRideStatus', { rideId: savedRideId2 }, async (response: any) => {
-                        if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
-                            AsyncStorage.removeItem('activeRideId');
-                            return;
-                        }
-                        await hydratePassengerRide(savedRideId2, response);
-                    });
-                }
+            const activeRideId = response.rideData.tripId;
+            await hydratePassengerRide(activeRideId, response);
+        } catch (error) {
+            console.log("No se pudo restaurar desde backend, intento con activeRideId local", error);
+            const savedRideId2 = savedRideId ?? await AsyncStorage.getItem('activeRideId');
+            if (savedRideId2 && socket.current) {
+                socket.current.emit('getRideStatus', { rideId: savedRideId2 }, async (response: any) => {
+                    if (!response || !response.rideData || !isActiveBackendRideStatus(response.status)) {
+                        AsyncStorage.removeItem('activeRideId');
+                        return;
+                    }
+                    await hydratePassengerRide(savedRideId2, response);
+                });
             }
-        };
+        }
+    };
+
+    useEffect(() => {
+        if (!userId) return;
         restoreSession();
-    }, [userId])
+    }, [userId]);
+
+    // Actualizar la pantalla cuando la app regrese de segundo plano a primer plano
+    useEffect(() => {
+        const appStateSub = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active' && userId) {
+                console.log('[UserHomeScreen] App volvió a primer plano. Sincronizando estado...');
+                restoreSession();
+            }
+        });
+
+        return () => {
+            appStateSub.remove();
+        };
+    }, [userId]);
 
     // 2. Obtener ubicación inicial y Rol
     useEffect(() => {
@@ -457,11 +543,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         let interval: NodeJS.Timeout;
         if (status === 'SEARCHING') {
             const calculateInitialTime = () => {
-                let initialTime = 60;
+                let initialTime = 600;
                 if (activeRequestRide?.ride?.createdAt) {
                     const createdTime = new Date(activeRequestRide.ride.createdAt).getTime();
                     const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
-                    initialTime = Math.max(0, 60 - diffSeconds);
+                    initialTime = Math.max(0, 600 - diffSeconds);
                 }
                 setSearchingTimeLeft(initialTime);
             };
@@ -477,7 +563,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 });
             }, 1000);
         } else {
-            setSearchingTimeLeft(60);
+            setSearchingTimeLeft(600);
         }
         return () => {
             if (interval) clearInterval(interval);
@@ -710,6 +796,40 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         );
     };
 
+    const handleCancelPaymentAndRide = async () => {
+        showAlert(
+            'Cancelar Solicitud',
+            '¿Deseas cancelar la solicitud de viaje? Si cierras la pasarela de pagos, se cancelará tu viaje.',
+            [
+                {
+                    text: 'No',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Sí, cancelar',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            if (currentRideId) {
+                                const response = await cancelSolicitudApi(currentRideId);
+                                console.log("Viaje cancelado por desistir del pago:", response);
+                            }
+                            await AsyncStorage.removeItem('activeRideId');
+                            setShowPaymentModal(false);
+                            setPaymentUrl(null);
+                            setPaymentId(null);
+                            setCurrentRideId(null);
+                            setStatus('ROUTE');
+                        } catch (e) {
+                            console.error(e);
+                            showAlert('Error', 'Hubo un problema al cancelar la solicitud.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
     const handleChangeRoute = () => {
         setStatus('PICKUP');
         setPickupCoords(null);
@@ -747,8 +867,29 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
             socket.current.emit('joinRide', response.id);
             setCurrentRideId(response.id);
             setActiveRideBackendStatus('REQUESTED');
+            setActiveRequestRide({ ride: response, driverId: null });
             await AsyncStorage.setItem('activeRideId', response.id);
-            setStatus('SEARCHING');
+
+            if (paymentMethod === 'CARD') {
+                setShowPaymentModal(true);
+                setIsPreparingPayment(true);
+                try {
+                    const prepRes = await preparePaymentApi(response.id);
+                    if (prepRes?.checkoutUrl) {
+                        setPaymentUrl(prepRes.checkoutUrl);
+                        setPaymentId(prepRes.paymentId);
+                    } else {
+                        showAlert("Error de Pago", "No se pudo obtener el enlace de pago de PayPhone.");
+                    }
+                } catch (e) {
+                    console.error("Error preparing payment:", e);
+                    showAlert("Error de Pago", "Ocurrió un error al preparar el pago con PayPhone.");
+                } finally {
+                    setIsPreparingPayment(false);
+                }
+            } else {
+                setStatus('SEARCHING');
+            }
 
         } catch (e) {
             console.error(e);
@@ -1041,8 +1182,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                     key: GOOGLE_MAPS_APIKEY,
                                     language: 'es',
                                     components: 'country:ec',
-                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca
-                                    radius: '30000',                    // 30 km — sesga hacia Cuenca sin excluir el resto
+                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca (Azuay, Ecuador)
+                                    radius: '50000',                    // 50 km para cubrir Azuay/Cuenca
+                                    strictbounds: true,
                                 }}
                                 styles={{
                                     container: { flex: 0, width: '100%', zIndex: 20 },
@@ -1096,8 +1238,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                                     key: GOOGLE_MAPS_APIKEY,
                                     language: 'es',
                                     components: 'country:ec',
-                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca
-                                    radius: '30000',                    // 30 km — sesga hacia Cuenca sin excluir el resto
+                                    location: '-2.9001285,-79.0058965', // Centro de Cuenca (Azuay, Ecuador)
+                                    radius: '50000',                    // 50 km para cubrir Azuay/Cuenca
+                                    strictbounds: true,
                                 }}
                                 styles={{
                                     container: { flex: 0, width: '100%', zIndex: 10 },
@@ -1172,9 +1315,8 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
 
                         <View style={styles.progressBarContainer}>
-                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 60) * 100}%` }]} />
+                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 600) * 100}%` }]} />
                         </View>
-                        <Text style={styles.countdownText}>Tiempo restante: {searchingTimeLeft} seg</Text>
 
                         <TouchableOpacity
                             style={styles.btnCancelSearch}
@@ -1369,6 +1511,87 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                 onSend={handleSendRating}
                 driverName={driverInfo?.name}
             />
+
+            {/* Modal de Pago con Tarjeta PayPhone */}
+            <Modal
+                visible={showPaymentModal}
+                transparent={false}
+                animationType="slide"
+            >
+                <View style={styles.webViewContainer}>
+                    {/* Header del Modal */}
+                    <View style={[styles.webViewHeader, { paddingTop: insets.top + 10 }]}>
+                        <TouchableOpacity
+                            style={styles.webViewCloseBtn}
+                            onPress={handleCancelPaymentAndRide}
+                        >
+                            <Ionicons name="close-outline" size={28} color="#1E3A8A" />
+                        </TouchableOpacity>
+                        <Text style={styles.webViewTitle}>Pago Seguro con Tarjeta</Text>
+                        <View style={{ width: 28 }} />
+                    </View>
+
+                    {isPreparingPayment ? (
+                        <View style={styles.webViewLoader}>
+                            <ActivityIndicator size="large" color="#1D4ED8" />
+                            <Text style={styles.webViewLoaderText}>Inicializando pasarela segura...</Text>
+                        </View>
+                    ) : paymentUrl ? (
+                        <WebView
+                            source={{ uri: paymentUrl }}
+                            style={{ flex: 1 }}
+                            onNavigationStateChange={(navState) => {
+                                console.log("WebView Navigation State Change:", navState.url);
+                                if (navState.url.includes('PayPhone/Cancelled')) {
+                                    console.log("Detectado cancelación en WebView de PayPhone. Cancelando viaje...");
+                                    if (currentRideId) {
+                                        cancelSolicitudApi(currentRideId).catch(err => console.error("Error auto-canceling:", err));
+                                    }
+                                    AsyncStorage.removeItem('activeRideId');
+                                    setShowPaymentModal(false);
+                                    setPaymentUrl(null);
+                                    setPaymentId(null);
+                                    setCurrentRideId(null);
+                                    setStatus('ROUTE');
+                                    showAlert("Pago Cancelado", "Has cancelado el proceso de pago. Tu solicitud de viaje fue cancelada.");
+                                }
+                            }}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.webViewInnerLoader}>
+                                    <ActivityIndicator size="large" color="#1D4ED8" />
+                                </View>
+                            )}
+                        />
+                    ) : (
+                        <View style={styles.webViewLoader}>
+                            <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+                            <Text style={styles.webViewLoaderText}>No se pudo cargar la pasarela de pagos.</Text>
+                            <TouchableOpacity
+                                style={styles.retryBtnFull}
+                                onPress={async () => {
+                                    if (currentRideId) {
+                                        setIsPreparingPayment(true);
+                                        try {
+                                            const prepRes = await preparePaymentApi(currentRideId);
+                                            if (prepRes?.checkoutUrl) {
+                                                setPaymentUrl(prepRes.checkoutUrl);
+                                                setPaymentId(prepRes.paymentId);
+                                            }
+                                        } catch (err) {
+                                            console.error("Retry payment error:", err);
+                                        } finally {
+                                            setIsPreparingPayment(false);
+                                        }
+                                    }
+                                }}
+                            >
+                                <Text style={styles.retryBtnFullText}>Reintentar Cargar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -1731,5 +1954,69 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
         zIndex: 10,
+    },
+    webViewContainer: {
+        flex: 1,
+        backgroundColor: '#F3F4F6',
+    },
+    webViewHeader: {
+        minHeight: 60,
+        backgroundColor: 'white',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        paddingBottom: 10,
+    },
+    webViewCloseBtn: {
+        padding: 4,
+    },
+    webViewTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#1E3A8A',
+    },
+    webViewLoader: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    webViewLoaderText: {
+        marginTop: 16,
+        fontSize: 16,
+        color: '#1E3A8A',
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    webViewInnerLoader: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'white',
+    },
+    retryBtnFull: {
+        marginTop: 20,
+        backgroundColor: '#1D4ED8',
+        paddingVertical: 12,
+        paddingHorizontal: 30,
+        borderRadius: 12,
+        elevation: 2,
+    },
+    retryBtnFullText: {
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: 16,
     }
 });

@@ -65,7 +65,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     const [pendingRequest, setPendingRequest] = useState<any>(null);
     const [activeRequestRide, setActiveRequestRide] = useState<any>(null);
     const [reference, setReference] = useState('');
-    const [searchingTimeLeft, setSearchingTimeLeft] = useState(60);
+    const [searchingTimeLeft, setSearchingTimeLeft] = useState(600);
     const [driverTimeLeft, setDriverTimeLeft] = useState(60);
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [otpCode, setOtpCode] = useState('');
@@ -73,6 +73,37 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     const [isChatVisible, setIsChatVisible] = useState(false);
     const [initialChatMessages, setInitialChatMessages] = useState<any[]>([]);
     const [activeRideBackendStatus, setActiveRideBackendStatus] = useState<string | null>(null);
+
+    const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 6371e3; // Earth radius in meters
+        const phi1 = (lat1 * Math.PI) / 180;
+        const phi2 = (lat2 * Math.PI) / 180;
+        const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+        const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+        const a =
+            Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+            Math.cos(phi1) * Math.cos(phi2) *
+            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c; // Distance in meters
+    };
+
+    const getDistanceToPickup = () => {
+        if (!myLocation || !activeRequestRide?.ride?.originLat || !activeRequestRide?.ride?.originLng) {
+            return null;
+        }
+        return getDistanceInMeters(
+            myLocation.latitude,
+            myLocation.longitude,
+            activeRequestRide.ride.originLat,
+            activeRequestRide.ride.originLng
+        );
+    };
+
+    const distanceToPickup = getDistanceToPickup();
+    const isWithin100Meters = distanceToPickup !== null && distanceToPickup <= 100;
     const [unreadCount, setUnreadCount] = useState(0);
 
     useEffect(() => {
@@ -186,11 +217,15 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 }
             });
 
-            socket.current.on('trip_taken', (data: { tripId: string }) => {
+            socket.current.on('trip_taken', (data: { tripId: string, reason?: string }) => {
                 setAvailableRequests(prev => prev.filter(r => r.tripId !== data.tripId));
                 if (pendingRequest?.tripId === data.tripId) {
                     setShowRequestDialog(false);
-                    showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                    if (data.reason === 'timeout') {
+                        showAlert("Viaje no disponible", "La solicitud de viaje ha expirado por tiempo.");
+                    } else {
+                        showAlert("Viaje no disponible", "Otro conductor ha aceptado esta carrera.");
+                    }
                 }
             });
 
@@ -301,11 +336,11 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         let interval: NodeJS.Timeout;
         if (status === 'SEARCHING') {
             const calculateInitialTime = () => {
-                let initialTime = 60;
+                let initialTime = 600;
                 if (activeRequestRide?.ride?.createdAt) {
                     const createdTime = new Date(activeRequestRide.ride.createdAt).getTime();
                     const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
-                    initialTime = Math.max(0, 60 - diffSeconds);
+                    initialTime = Math.max(0, 600 - diffSeconds);
                 }
                 setSearchingTimeLeft(initialTime);
             };
@@ -321,7 +356,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 });
             }, 1000);
         } else {
-            setSearchingTimeLeft(60);
+            setSearchingTimeLeft(600);
         }
         return () => {
             if (interval) clearInterval(interval);
@@ -331,16 +366,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     useEffect(() => {
         let interval: NodeJS.Timeout;
         if (showRequestDialog && pendingRequest) {
-            const calculateTime = () => {
-                const createdTime = pendingRequest.createdAt ? new Date(pendingRequest.createdAt).getTime() : Date.now();
-                const diffSeconds = Math.floor((Date.now() - createdTime) / 1000);
-                const remaining = Math.max(0, 60 - diffSeconds);
-                setDriverTimeLeft(remaining);
-                if (remaining <= 0) {
-                    setShowRequestDialog(false);
-                }
-            };
-            calculateTime();
+            setDriverTimeLeft(60);
 
             interval = setInterval(() => {
                 setDriverTimeLeft(prev => {
@@ -367,6 +393,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         setActiveRequestRide({
             ...response,
             ride: {
+                createdAt: response.ride?.createdAt || response.rideData?.createdAt,
                 originLat: response.rideData.pickupCoords.lat,
                 originLng: response.rideData.pickupCoords.lng,
                 destLat: response.rideData.destCoords.lat,
@@ -1246,7 +1273,14 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             setPickupAddress(data.description || details?.formatted_address || '');
                             moveToLocation(details, true);
                         }}
-                        query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                        query={{
+                            key: GOOGLE_MAPS_APIKEY,
+                            language: 'es',
+                            components: 'country:ec',
+                            location: '-2.9001285,-79.0058965', // Centro de Cuenca (Azuay, Ecuador)
+                            radius: '50000',                    // 50 km para cubrir Azuay/Cuenca
+                            strictbounds: true,
+                        }}
                         styles={{
                             container: { flex: 0, width: '100%', marginBottom: 10, zIndex: 2 },
                             listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
@@ -1267,7 +1301,14 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             setDestinationAddress(data.description || details?.formatted_address || '');
                             moveToLocation(details, false);
                         }}
-                        query={{ key: GOOGLE_MAPS_APIKEY, language: 'es', components: 'country:ec' }}
+                        query={{
+                            key: GOOGLE_MAPS_APIKEY,
+                            language: 'es',
+                            components: 'country:ec',
+                            location: '-2.9001285,-79.0058965', // Centro de Cuenca (Azuay, Ecuador)
+                            radius: '50000',                    // 50 km para cubrir Azuay/Cuenca
+                            strictbounds: true,
+                        }}
                         styles={{
                             container: { flex: 0, width: '100%', zIndex: 1 },
                             listView: { backgroundColor: 'white', borderRadius: 10, elevation: 5 },
@@ -1320,9 +1361,8 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         <Text style={styles.searchingSubtext}>Notificando a los conductores cercanos a tu punto de recogida.</Text>
 
                         <View style={styles.progressBarContainer}>
-                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 60) * 100}%` }]} />
+                            <View style={[styles.progressBar, { width: `${(searchingTimeLeft / 600) * 100}%` }]} />
                         </View>
-                        <Text style={styles.countdownText}>Tiempo restante: {searchingTimeLeft} seg</Text>
 
                         <TouchableOpacity
                             style={styles.btnCancelSearch}
@@ -1493,14 +1533,22 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                                 <Text style={styles.btnText}>NAVEGAR</Text>
                             </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={[styles.btnConfirm, { backgroundColor: '#10B981', flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                                onPress={handleArrivedAtPickup}
-                            >
-                                <Ionicons name="checkmark-circle" size={20} color="white" />
-                                <Text style={styles.btnText}>LLEGUÉ</Text>
-                            </TouchableOpacity>
+                            {isWithin100Meters && (
+                                <TouchableOpacity
+                                    style={[styles.btnConfirm, { backgroundColor: '#10B981', flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                                    onPress={handleArrivedAtPickup}
+                                >
+                                    <Ionicons name="checkmark-circle" size={20} color="white" />
+                                    <Text style={styles.btnText}>LLEGUÉ</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
+
+                        {!isWithin100Meters && distanceToPickup !== null && (
+                            <Text style={{ textAlign: 'center', color: '#EF4444', fontSize: 13, marginTop: 10, fontWeight: '600', backgroundColor: '#FEF2F2', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#FEE2E2' }}>
+                                📍 Estás a {Math.round(distanceToPickup)}m del pasajero. Acércate a menos de 100m para poder marcar que llegaste.
+                            </Text>
+                        )}
 
                         {isChatEnabledRideStatus(activeRideBackendStatus) && (
                             <TouchableOpacity

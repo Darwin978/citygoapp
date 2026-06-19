@@ -135,3 +135,49 @@ export async function cancelSolicitudApi(id: string) {
         throw error;
     }
 }
+
+export async function preparePaymentApi(rideId: string) {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(`${endPoint.preparePayment}/${rideId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error('PREPARE PAYMENT ERROR');
+        }
+
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.error('Error preparing payment:', error);
+        throw error;
+    }
+}
+
+export async function getPaymentStatusApi(paymentId: string) {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(`${endPoint.getPaymentStatus}/${paymentId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error('GET PAYMENT STATUS ERROR');
+        }
+
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.error('Error fetching payment status:', error);
+        throw error;
+    }
+}
