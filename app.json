@@ -15,7 +15,7 @@
     "splash": {
       "resizeMode": "cover",
       "backgroundColor": "#000000",
-      "image": "./assets/negro.jpg"
+      "image": "./assets/negro.png"
     },
     "ios": {
       "googleServicesFile": "./firebase/GoogleService-Info.plist",
@@ -95,7 +95,8 @@
       "./plugins/withNotificationIcon",
       "./plugins/withKeepAliveAndroid",
       "@react-native-firebase/app",
-      "@react-native-firebase/messaging"
+      "@react-native-firebase/messaging",
+      "expo-font"
     ]
   }
 }

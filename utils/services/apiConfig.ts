@@ -24,4 +24,5 @@ export const endPoint = {
     updateLocation: `${BACKEND_URL}/driver/location`,
     preparePayment: `${BACKEND_URL}/payments/prepare`,
     getPaymentStatus: `${BACKEND_URL}/payments/status`,
+    availableRides: `${BACKEND_URL}/ride/available`,
 }

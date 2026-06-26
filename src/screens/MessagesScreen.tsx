@@ -64,6 +64,9 @@ export default function MessagesScreen() {
         setRideStatus(activeRide.status);
         setParticipantName(activeRide.clientId === userId ? activeRide.rideData.driver?.name || 'Conductor' : activeRide.rideData.clientName || 'Pasajero');
         setMessages((activeRide.rideData.messages || []).map((message: any) => mapMessage(message, userId)));
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }, 200);
         await AsyncStorage.setItem('activeRideId', activeRideId);
       } catch (error) {
         console.log('No se pudo cargar el chat activo', error);
@@ -180,7 +183,6 @@ export default function MessagesScreen() {
         )}
         contentContainerStyle={[styles.chatList, messages.length === 0 && styles.emptyChatList]}
         ListEmptyComponent={<Text style={styles.centerText}>Todavía no hay mensajes.</Text>}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
 
       <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
@@ -191,6 +193,11 @@ export default function MessagesScreen() {
           onChangeText={setInputText}
           placeholderTextColor="#6B7280"
           multiline
+          onFocus={() => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+          }}
         />
         <TouchableOpacity style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim()}>
           <Ionicons name="send" size={22} color="white" />

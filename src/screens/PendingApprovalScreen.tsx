@@ -23,13 +23,13 @@ export default function PendingApprovalScreen({ navigation }: any) {
       console.log(response);
       
       if (response.isApproved) {
+        await AsyncStorage.setItem('isApproved', 'true');
         aproveed(true);
-        login()
+        login();
       }
     } catch (error) {
       console.error("Error fetching user info:", error);
     }
-    
   }
 
   return (

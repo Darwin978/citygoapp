@@ -33,6 +33,9 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
         time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }))
     );
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }, 200);
   }, [initialMessages, rideId, userId]);
 
   useEffect(() => {
@@ -119,7 +122,6 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
             </View>
           )}
           contentContainerStyle={styles.chatList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={<Text style={styles.emptyText}>Todavía no hay mensajes.</Text>}
         />
 
@@ -131,6 +133,11 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
             onChangeText={setInputText}
             placeholderTextColor={'gray'}
             multiline
+            onFocus={() => {
+              setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: true });
+              }, 100);
+            }}
           />
           <TouchableOpacity style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim()}>
             <Ionicons name="send" size={24} color="white" />

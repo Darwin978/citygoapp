@@ -675,6 +675,12 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     // 2. Obtener ubicación inicial y Rol
     useEffect(() => {
         (async () => {
+            const DEFAULT_REGION = {
+                latitude: -2.9018,
+                longitude: -79.0049,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01
+            };
             try {
                 const savedRole = await AsyncStorage.getItem('role');
                 setRole(savedRole);
@@ -683,7 +689,13 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 }
 
                 let { status } = await Location.requestForegroundPermissionsAsync();
-                if (status !== 'granted') return;
+                if (status !== 'granted') {
+                    console.log("Permiso de ubicación denegado. Cargando ubicación por defecto (Cuenca).");
+                    setRegion(DEFAULT_REGION);
+                    setMyLocation({ latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude, heading: 0 });
+                    getAddressFromCoords(DEFAULT_REGION.latitude, DEFAULT_REGION.longitude, true);
+                    return;
+                }
 
                 const applyLocation = (loc: Location.LocationObject) => {
                     const { latitude, longitude, heading } = loc.coords;
@@ -697,14 +709,25 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 if (last) applyLocation(last);
 
                 // 2. Posición precisa en segundo plano: actualiza sin bloquear
-                Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.Balanced,
-                }).then(loc => {
+                try {
+                    const loc = await Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.Balanced,
+                    });
                     applyLocation(loc);
-                }).catch(() => { /* GPS no disponible, la posición cacheada es suficiente */ });
+                } catch (err) {
+                    console.log("GPS no disponible, usando última posición conocida o fallback.");
+                    if (!last) {
+                        setRegion(DEFAULT_REGION);
+                        setMyLocation({ latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude, heading: 0 });
+                        getAddressFromCoords(DEFAULT_REGION.latitude, DEFAULT_REGION.longitude, true);
+                    }
+                }
 
             } catch (error) {
-                console.log("Error al obtener ubicacion", error);
+                console.log("Error al obtener ubicacion, cargando ubicación por defecto", error);
+                setRegion(DEFAULT_REGION);
+                setMyLocation({ latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude, heading: 0 });
+                getAddressFromCoords(DEFAULT_REGION.latitude, DEFAULT_REGION.longitude, true);
             }
         })();
     }, []);

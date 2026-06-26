@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Linking, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Linking, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -8,10 +8,13 @@ import { getUserInfoApi, getUserStatsApi } from '../../utils/services/userServic
 import { Roles } from '../../utils/services/rolesEnum';
 import { addVehicleApi, deleteVehicleApi, getUserVehicles, setActiveVehicle } from '../../utils/services/vehicleService';
 import { useCustomAlert } from '../../utils/context/AlertContext';
+import { getAvailableRidesApi } from '../../utils/services/ridesServices';
+import { BACKEND_URL } from '../../utils/services/apiConfig';
 
 export default function ProfileScreen() {
   const { showAlert } = useCustomAlert();
   const { logout } = useAuth();
+  const navigation = useNavigation<any>();
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
@@ -20,15 +23,70 @@ export default function ProfileScreen() {
   const [isAddVehicleModalVisible, setIsAddVehicleModalVisible] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ marca: '', modelo: '', placa: '', color: '' });
 
+  const [availableRides, setAvailableRides] = useState<any[]>([]);
+  const [loadingAvailable, setLoadingAvailable] = useState(false);
+
+  const fetchAvailableRides = async () => {
+    try {
+      setLoadingAvailable(true);
+      const data = await getAvailableRidesApi();
+      setAvailableRides(data || []);
+    } catch (error) {
+      console.log('Error loading available rides:', error);
+    } finally {
+      setLoadingAvailable(false);
+    }
+  };
+
+  const handleAcceptRide = async (rideId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) return;
+
+      const response = await fetch(`${BACKEND_URL}/ride/${rideId}/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.status !== 'success') {
+        showAlert('Error', result?.message || 'No se pudo aceptar la carrera. Es posible que ya haya sido tomada.');
+        fetchAvailableRides();
+        return;
+      }
+
+      await AsyncStorage.setItem('activeRideId', rideId);
+      showAlert('Viaje Asignado', 'Has aceptado la carrera con éxito. Dirígete a la pestaña del Mapa para ver los detalles.');
+      fetchAvailableRides();
+      navigation.navigate('Mapa');
+    } catch (e) {
+      console.error(e);
+      showAlert('Error', 'Hubo un error al intentar aceptar la carrera.');
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       getUserInfo(); // Cargar inmediatamente al entrar a la pestaña
       getUserStats();
       loadRoleAndVehicles();
+      AsyncStorage.getItem('role').then((savedRole) => {
+        if (savedRole === Roles.DRIVER) {
+          fetchAvailableRides();
+        }
+      });
       const interval = setInterval(() => {
         getUserInfo();
         getUserStats();
         loadRoleAndVehicles();
+        AsyncStorage.getItem('role').then((savedRole) => {
+          if (savedRole === Roles.DRIVER) {
+            fetchAvailableRides();
+          }
+        });
       }, 60000);
       return () => clearInterval(interval);
     }, [])
@@ -158,6 +216,43 @@ export default function ProfileScreen() {
             <InsightCard icon="trending-up-outline" label="Promedio por carrera" value={formatMoney(stats?.averageRideValue)} accent="#1D4ED8" />
             <InsightCard icon="close-circle-outline" label="Canceladas" value={stats?.cancelledRides ?? 0} accent="#EF4444" />
           </View>
+          <ProfileSection title="Carreras Disponibles para Tomar">
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={{ fontSize: 12, color: '#6B7280' }}>Visualiza y acepta viajes pendientes.</Text>
+              <TouchableOpacity onPress={fetchAvailableRides} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="refresh" size={16} color="#1D4ED8" />
+                <Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: 'bold', marginLeft: 4 }}>Actualizar</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {loadingAvailable && availableRides.length === 0 ? (
+              <ActivityIndicator size="small" color="#1D4ED8" style={{ marginVertical: 10 }} />
+            ) : availableRides.length === 0 ? (
+              <Text style={styles.emptyText}>No hay carreras disponibles en este momento.</Text>
+            ) : (
+              availableRides.map((ride) => (
+                <View key={ride.tripId} style={styles.availableRideCard}>
+                  <View style={styles.rideTop}>
+                    <Text style={styles.ridePrice}>{formatMoney(ride.price)}</Text>
+                    <Text style={styles.rideTime}>{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                  </View>
+                  <Text style={styles.rideRoute} numberOfLines={1}>{ride.originAddress}</Text>
+                  <Text style={styles.rideDestination} numberOfLines={1}>{ride.destinationAddress}</Text>
+                  {ride.reference ? (
+                    <Text style={styles.rideReference} numberOfLines={1}>Ref: {ride.reference}</Text>
+                  ) : null}
+                  <TouchableOpacity 
+                    style={styles.acceptRideBtn} 
+                    onPress={() => handleAcceptRide(ride.tripId)}
+                  >
+                    <Ionicons name="checkmark-circle-outline" size={18} color="white" />
+                    <Text style={styles.acceptRideBtnText}>Aceptar Viaje</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </ProfileSection>
+
           <ProfileSection title="Carreras con tarjeta por cobrar">
             <RideList rides={stats?.pendingCardPayouts || []} emptyText="No tienes carreras pendientes por cobrar." />
           </ProfileSection>
@@ -474,5 +569,11 @@ const styles = StyleSheet.create({
 
   input: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 10, padding: 15, marginBottom: 10, fontSize: 16 },
   saveBtn: { backgroundColor: '#1D4ED8', padding: 15, borderRadius: 12, alignItems: 'center', width: '100%', marginTop: 10 },
-  saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 }
+  saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+
+  availableRideCard: { backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1D4ED8', marginBottom: 10 },
+  rideTime: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  rideReference: { fontSize: 12, color: '#4B5563', marginTop: 4, fontStyle: 'italic' },
+  acceptRideBtn: { flexDirection: 'row', backgroundColor: '#10B981', padding: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 12, gap: 6 },
+  acceptRideBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 }
 });

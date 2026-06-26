@@ -50,6 +50,41 @@ export default function RegisterScreen({ navigation }: any) {
     if (!result.canceled) setCedulaImage(result.assets[0].uri);
   };
 
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      showAlert('Permiso requerido', 'Necesitamos acceso a la cámara para tomar la foto de tu cédula.');
+      return;
+    }
+    let result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.6,
+    });
+    if (!result.canceled) setCedulaImage(result.assets[0].uri);
+  };
+
+  const handleImageSelection = () => {
+    showAlert(
+      'Cargar Identificación',
+      '¿Cómo deseas subir la foto de tu cédula?',
+      [
+        {
+          text: 'Tomar Foto (Cámara)',
+          onPress: takePhoto,
+        },
+        {
+          text: 'Seleccionar de Galería',
+          onPress: pickImage,
+        },
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        }
+      ]
+    );
+  };
+
   // --- VALIDACIONES ---
   const validarCedulaEcu = (id: string) => {
     if (id.length !== 10) return false;
@@ -159,13 +194,13 @@ export default function RegisterScreen({ navigation }: any) {
 
           {/* SECCIÓN FOTO CÉDULA (OBLIGATORIA) */}
           <Text style={styles.label}>Foto de Cédula (Frontal) *</Text>
-          <TouchableOpacity style={styles.uploadBox} onPress={pickImage}>
+          <TouchableOpacity style={styles.uploadBox} onPress={handleImageSelection}>
             {cedulaImage ? (
               <Image source={{ uri: cedulaImage }} style={styles.imagePreview} />
             ) : (
               <>
                 <Ionicons name="id-card-outline" size={40} color="#1D4ED8" />
-                <Text style={{ color: '#1D4ED8', fontWeight: '600' }}>Subir identificación</Text>
+                <Text style={{ color: '#1D4ED8', fontWeight: '600' }}>Cargar identificación</Text>
               </>
             )}
           </TouchableOpacity>

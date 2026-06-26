@@ -378,10 +378,10 @@ async function acceptRideFromNotification(rideId: string) {
     await AsyncStorage.setItem('activeRideId', rideId);
     await AsyncStorage.removeItem('pendingNotifAction');
     await AsyncStorage.removeItem('pendingNotifType');
-    
+
     // Emitir evento para que las pantallas activas (como DriverHomeScreen) se enteren de que la carrera fue aceptada
     DeviceEventEmitter.emit('RIDE_ACCEPTED_FROM_NOTIF', { rideId });
-    
+
     return true;
   } catch (error) {
     await AsyncStorage.setItem('pendingNotifAction', ACCEPT_RIDE_ACTION_ID);
@@ -422,7 +422,7 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
       // NEW_RIDE → conductor recibe FSI con solicitud de carrera
       // ARRIVED  → cliente recibe FSI cuando el conductor ya está esperando afuera
       await showRideNotification(title, body, rideId, type);
-      
+
       // Abrir la app automáticamente para mostrar la carrera o la llegada en pantalla completa (requiere permiso de overlay)
       Linking.openURL(`${RIDE_DEEPLINK_PREFIX}/${rideId}`).catch(() => { });
     } else if (type === 'MESSAGE') {
@@ -440,13 +440,13 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 // la app está en background (tap en la notificación, botón de acción, etc.).
 // ─────────────────────────────────────────────────────────────────────────────
 notifee.onBackgroundEvent(async ({ type, detail }) => {
-  const isPressEvent   = type === EventType.PRESS;
-  const isActionPress  = type === EventType.ACTION_PRESS;
+  const isPressEvent = type === EventType.PRESS;
+  const isActionPress = type === EventType.ACTION_PRESS;
   if (!isPressEvent && !isActionPress) return;
 
-  const rideId    = detail.notification?.data?.rideId    as string | undefined;
-  const notifType = detail.notification?.data?.type      as string | undefined;
-  const actionId  = detail.pressAction?.id;
+  const rideId = detail.notification?.data?.rideId as string | undefined;
+  const notifType = detail.notification?.data?.type as string | undefined;
+  const actionId = detail.pressAction?.id;
 
   if (!rideId) return;
 
@@ -467,7 +467,7 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       // Limpiar cualquier dato temporal de este viaje rechazado
       await AsyncStorage.removeItem('activeRideId');
       await AsyncStorage.removeItem('pendingNotifType');
-      
+
       if (detail.notification?.id) {
         await notifee.cancelNotification(detail.notification.id);
       }
@@ -487,13 +487,13 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
 //   PRESS        → el usuario toca la notificación → abrir app en el viaje/chat
 //   ACTION_PRESS → el usuario toca el botón "Aceptar" o "Rechazar" sin abrir la app
 notifee.onForegroundEvent(async ({ type, detail }) => {
-  const isPressEvent   = type === EventType.PRESS;
-  const isActionPress  = type === EventType.ACTION_PRESS;
+  const isPressEvent = type === EventType.PRESS;
+  const isActionPress = type === EventType.ACTION_PRESS;
   if (!isPressEvent && !isActionPress) return;
 
-  const rideId    = detail.notification?.data?.rideId    as string | undefined;
-  const notifType = detail.notification?.data?.type      as string | undefined;
-  const actionId  = detail.pressAction?.id;
+  const rideId = detail.notification?.data?.rideId as string | undefined;
+  const notifType = detail.notification?.data?.type as string | undefined;
+  const actionId = detail.pressAction?.id;
 
   if (!rideId) return;
 
@@ -512,7 +512,7 @@ notifee.onForegroundEvent(async ({ type, detail }) => {
       // Limpiar datos
       await AsyncStorage.removeItem('activeRideId');
       await AsyncStorage.removeItem('pendingNotifType');
-      
+
       if (detail.notification?.id) {
         await notifee.cancelNotification(detail.notification.id);
       }

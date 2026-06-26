@@ -181,3 +181,26 @@ export async function getPaymentStatusApi(paymentId: string) {
         throw error;
     }
 }
+
+export async function getAvailableRidesApi() {
+    try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(endPoint.availableRides, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error('GET AVAILABLE RIDES ERROR');
+        }
+
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.error('Error fetching available rides:', error);
+        throw error;
+    }
+}

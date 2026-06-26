@@ -48,6 +48,7 @@ export default function LoginScreen({ navigation }: any) {
       await AsyncStorage.setItem('userId', user.id);
       await AsyncStorage.setItem('email', user.email);
       await AsyncStorage.setItem('role', user.role);
+      await AsyncStorage.setItem('isApproved', String(user.isApproved));
       login();
       aproveed(user.isApproved);
 
