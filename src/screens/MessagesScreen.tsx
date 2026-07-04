@@ -47,7 +47,9 @@ export default function MessagesScreen() {
 
     const loadActiveChat = async () => {
       if (!userId) return;
-      setLoading(true);
+      if (!rideId) {
+        setLoading(true);
+      }
       try {
         const activeRide = await getActiveRideApi();
         if (!mounted) return;
@@ -63,10 +65,20 @@ export default function MessagesScreen() {
         setRideId(activeRideId);
         setRideStatus(activeRide.status);
         setParticipantName(activeRide.clientId === userId ? activeRide.rideData.driver?.name || 'Conductor' : activeRide.rideData.clientName || 'Pasajero');
-        setMessages((activeRide.rideData.messages || []).map((message: any) => mapMessage(message, userId)));
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-        }, 200);
+        
+        const mapped = (activeRide.rideData.messages || []).map((message: any) => mapMessage(message, userId));
+        setMessages((prev) => {
+          const isSame =
+            prev.length === mapped.length &&
+            prev.every((msg, idx) => msg.id === mapped[idx]?.id && msg.text === mapped[idx]?.text);
+          if (isSame) return prev;
+
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }, 150);
+          return mapped;
+        });
+
         await AsyncStorage.setItem('activeRideId', activeRideId);
       } catch (error) {
         console.log('No se pudo cargar el chat activo', error);
@@ -81,7 +93,7 @@ export default function MessagesScreen() {
     return () => {
       mounted = false;
     };
-  }, [userId]);
+  }, [userId, rideId]);
 
   useEffect(() => {
     if (!userId || !rideId || !chatEnabled) return;
@@ -152,7 +164,7 @@ export default function MessagesScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
       style={styles.container}
     >

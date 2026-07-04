@@ -28,6 +28,8 @@ export default function RegisterScreen({ navigation }: any) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([{ plate: '', brand: '', model: '', color: '' }]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -206,8 +208,41 @@ export default function RegisterScreen({ navigation }: any) {
           </TouchableOpacity>
 
           <Text style={styles.label}>Seguridad</Text>
-          <TextInput placeholder="Clave (8+ caracteres, 1 número)" placeholderTextColor={placeholderColor} style={styles.input} secureTextEntry onChangeText={setPassword} />
-          <TextInput placeholder="Confirmar Clave" placeholderTextColor={placeholderColor} style={styles.input} secureTextEntry onChangeText={setConfirmPassword} />
+          <View style={styles.passwordContainer}>
+            <TextInput
+              placeholder="Clave (8+ caracteres, 1 número)"
+              placeholderTextColor={placeholderColor}
+              style={styles.passwordInput}
+              secureTextEntry={!showPassword}
+              onChangeText={setPassword}
+              value={password}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={20}
+                color="#9CA3AF"
+              />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.passwordContainer}>
+            <TextInput
+              placeholder="Confirmar Clave"
+              placeholderTextColor={placeholderColor}
+              style={styles.passwordInput}
+              secureTextEntry={!showConfirmPassword}
+              onChangeText={setConfirmPassword}
+              value={confirmPassword}
+            />
+            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+              <Ionicons
+                name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
+                size={20}
+                color="#9CA3AF"
+              />
+            </TouchableOpacity>
+          </View>
 
           {/* SECCIÓN VEHÍCULOS (CONDUCTOR) */}
           {role === 'DRIVER' && (
@@ -279,6 +314,8 @@ const styles = StyleSheet.create({
   form: { paddingHorizontal: 20 },
   label: { fontSize: 14, fontWeight: 'bold', color: '#374151', marginVertical: 8 },
   input: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 12, fontSize: 16, color: '#1F2937', borderWidth: 1, borderColor: '#E5E7EB' },
+  passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 12, marginBottom: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E5E7EB' },
+  passwordInput: { flex: 1, paddingVertical: 15, fontSize: 16, color: '#1F2937' },
   uploadBox: { height: 180, backgroundColor: '#E0E7FF', borderStyle: 'dashed', borderWidth: 2, borderColor: '#1D4ED8', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 20, overflow: 'hidden' },
   imagePreview: { width: '100%', height: '100%' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

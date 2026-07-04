@@ -8,7 +8,8 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Image
+  Image,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -24,6 +25,7 @@ export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -101,9 +103,16 @@ export default function LoginScreen({ navigation }: any) {
               style={styles.input}
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              secureTextEntry={!showPassword}
               placeholderTextColor="#9CA3AF"
             />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={20}
+                color="#9CA3AF"
+              />
+            </TouchableOpacity>
           </View>
 
           {/*<TouchableOpacity style={styles.forgotBtn}>
@@ -123,6 +132,17 @@ export default function LoginScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Soporte WhatsApp */}
+      <TouchableOpacity
+        style={styles.whatsappSupportBtn}
+        onPress={() => {
+          const url = "https://wa.me/+593995580333/?text=Hola%20necesito%20soporte%20con%20mi%20app%20CityGo";
+          Linking.openURL(url);
+        }}
+      >
+        <Ionicons name="logo-whatsapp" size={28} color="white" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -171,4 +191,18 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 40 },
   footerText: { color: '#6B7280', fontSize: 15 },
   registerLink: { color: '#1D4ED8', fontWeight: '800', fontSize: 15 },
+  whatsappSupportBtn: {
+    position: 'absolute',
+    bottom: 30,
+    right: 25,
+    backgroundColor: '#25D366',
+    padding: 15,
+    borderRadius: 35,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 10,
+  },
 });

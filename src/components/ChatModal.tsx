@@ -13,7 +13,7 @@ interface ChatModalProps {
   onNewMessage?: () => void;
 }
 
-export default function ChatModal({ visible, onClose, socket, rideId, userId, initialMessages = [], onNewMessage }: ChatModalProps) {
+function ChatModal({ visible, onClose, socket, rideId, userId, initialMessages = [], onNewMessage }: ChatModalProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
@@ -25,18 +25,34 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
   }, [onNewMessage]);
 
   useEffect(() => {
-    setMessages(
-      (initialMessages || []).map((payload) => ({
-        id: payload.id || Math.random().toString(),
-        text: payload.text,
-        sender: payload.senderId === userId ? 'me' : 'other',
-        time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }))
-    );
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: false });
-    }, 200);
+    const mapped = (initialMessages || []).map((payload) => ({
+      id: payload.id || `${payload.senderId}-${payload.timestamp}`,
+      text: payload.text,
+      sender: payload.senderId === userId ? 'me' : 'other',
+      time: new Date(payload.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }));
+
+    setMessages((prev) => {
+      // Evitar re-renders y parpadeos si los mensajes son idénticos
+      const isSame =
+        prev.length === mapped.length &&
+        prev.every((msg, idx) => msg.id === mapped[idx]?.id && msg.text === mapped[idx]?.text);
+      if (isSame) return prev;
+
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 150);
+      return mapped;
+    });
   }, [initialMessages, rideId, userId]);
+
+  useEffect(() => {
+    if (visible && messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 150);
+    }
+  }, [visible]);
 
   useEffect(() => {
     if (!socket || !rideId || !userId) return;
@@ -90,7 +106,7 @@ export default function ChatModal({ visible, onClose, socket, rideId, userId, in
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         style={styles.container}
       >
@@ -168,9 +184,25 @@ const styles = StyleSheet.create({
   myText: { color: 'white' },
   otherText: { color: '#374151' },
   timeText: { fontSize: 10, color: '#9CA3AF', marginTop: 5, alignSelf: 'flex-end' },
-  inputArea: { flexDirection: 'row', padding: 15, backgroundColor: 'white', alignItems: 'center' },
+  inputArea: { flexDirection: 'row', padding: 15, backgroundColor: 'white', alignItems: 'flex-end' },
   input: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 22, paddingHorizontal: 18, paddingVertical: 11, minHeight: 45, maxHeight: 110, color: '#111827' },
   sendBtn: { backgroundColor: '#1D4ED8', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
   sendBtnDisabled: { backgroundColor: '#93A8D8' },
   emptyText: { color: '#6B7280', textAlign: 'center', marginTop: 40 }
 });
+
+const areEqual = (prevProps: ChatModalProps, nextProps: ChatModalProps) => {
+  const visibleEqual = prevProps.visible === nextProps.visible;
+  const rideIdEqual = prevProps.rideId === nextProps.rideId;
+  const userIdEqual = prevProps.userId === nextProps.userId;
+  const socketEqual = prevProps.socket === nextProps.socket;
+  
+  const prevMsgs = prevProps.initialMessages || [];
+  const nextMsgs = nextProps.initialMessages || [];
+  const msgsEqual = prevMsgs.length === nextMsgs.length && 
+    prevMsgs.every((msg, idx) => msg.id === nextMsgs[idx]?.id && msg.text === nextMsgs[idx]?.text);
+    
+  return visibleEqual && rideIdEqual && userIdEqual && socketEqual && msgsEqual;
+};
+
+export default React.memo(ChatModal, areEqual);

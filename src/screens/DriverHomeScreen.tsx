@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking, AppState, DeviceEventEmitter } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -29,6 +30,7 @@ const ACCEPT_RIDE_ACTION_ID = 'accept_ride';
 export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void }) {
     const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
+    const isFocused = useIsFocused();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
     const [isOnline, setIsOnline] = useState(false);
@@ -103,7 +105,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     };
 
     const distanceToPickup = getDistanceToPickup();
-    const isWithin100Meters = distanceToPickup !== null && distanceToPickup <= 100;
+    const isWithin250Meters = distanceToPickup !== null && distanceToPickup <= 250;
     const [unreadCount, setUnreadCount] = useState(0);
 
     useEffect(() => {
@@ -569,9 +571,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     };
 
     useEffect(() => {
-        if (!userId) return;
+        if (!userId || !isFocused) return;
         restoreSession();
-    }, [userId]);
+    }, [userId, isFocused]);
 
     // Escuchar si el conductor acepta la carrera desde el banner/notificación nativa
     useEffect(() => {
@@ -871,17 +873,17 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
     };
 
     const handleChangeStatusDriver = async (onlineStatus: boolean) => {
+        if (!onlineStatus && status === 'ON_RIDE') {
+            showAlert('Carrera activa', 'No puedes desconectarte mientras tienes una carrera en curso.');
+            return;
+        }
         setIsOnline(onlineStatus);
         await updateStatusDriverApi(onlineStatus);
         if (onlineStatus) {
             startKeepAlive(); // ← mantener proceso vivo mientras el conductor está disponible
         } else {
-            if (['IDLE', 'PICKUP', 'DESTINATION', 'ROUTE', 'SEARCHING'].includes(status)) {
-                stopKeepAlive(); // ← detener el servicio solo si no hay carrera activa
-                if (onOffline) onOffline();
-            } else {
-                showAlert('Modo Cliente', 'Pasarás a la vista de cliente al terminar tu carrera actual.');
-            }
+            stopKeepAlive();
+            if (onOffline) onOffline();
         }
     }
 
@@ -1271,7 +1273,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 isManualZoom={isManualZoom}
             />
              Driver Interface - Online Toggle */}
-            {role === Roles.DRIVER && (isOnline || (status !== 'ROUTE' && status !== 'SEARCHING')) && (
+            {role === Roles.DRIVER && status !== 'ON_RIDE' && (isOnline || (status !== 'ROUTE' && status !== 'SEARCHING')) && (
                 <View style={[styles.driverInterface, { top: insets.top + (isOnline ? 10 : 150), zIndex: isOnline ? 2000 : 900 }]}>
                     <View style={styles.statusCard}>
                         <Text style={styles.statusText}>{isOnline ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}</Text>
@@ -1446,7 +1448,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         </View>
 
                         <TouchableOpacity style={styles.btnConfirm} onPress={handleRequestRide} disabled={loading}>
-                            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Confirmar Viaje</Text>}
+                            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Pedir Taxi</Text>}
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.btnCancel}
@@ -1534,9 +1536,16 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                         <Text style={styles.statusLabel}>RECOGER PASAJERO</Text>
                         <View style={styles.clientInfoRow}>
                             <Ionicons name="person" size={24} color="#1D4ED8" />
-                            <Text style={styles.clientNameText}>
-                                Recoger a: {pendingRequest?.clientName || 'Pasajero'}
-                            </Text>
+                            <View style={{ flex: 1, marginLeft: 10 }}>
+                                <Text style={[styles.clientNameText, { marginLeft: 0 }]}>
+                                    Recoger a: {pendingRequest?.clientName || 'Pasajero'}
+                                </Text>
+                                {routeDetails?.duration !== undefined && routeDetails?.distance !== undefined && (
+                                    <Text style={{ fontSize: 13, color: '#6B7280', marginTop: 2 }}>
+                                        Tiempo estimado: {Math.round(routeDetails.duration)} {Math.round(routeDetails.duration) === 1 ? 'minuto' : 'minutos'} ({routeDetails.distance.toFixed(1)} km)
+                                    </Text>
+                                )}
+                            </View>
                         </View>
 
                         {pendingRequest?.reference ? (
@@ -1556,7 +1565,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                                 <Text style={styles.btnText}>NAVEGAR</Text>
                             </TouchableOpacity>
 
-                            {isWithin100Meters && (
+                            {isWithin250Meters && (
                                 <TouchableOpacity
                                     style={[styles.btnConfirm, { backgroundColor: '#10B981', flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                                     onPress={handleArrivedAtPickup}
@@ -1567,9 +1576,9 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                             )}
                         </View>
 
-                        {!isWithin100Meters && distanceToPickup !== null && (
+                        {!isWithin250Meters && distanceToPickup !== null && (
                             <Text style={{ textAlign: 'center', color: '#EF4444', fontSize: 13, marginTop: 10, fontWeight: '600', backgroundColor: '#FEF2F2', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#FEE2E2' }}>
-                                📍 Estás a {Math.round(distanceToPickup)}m del pasajero. Acércate a menos de 100m para poder marcar que llegaste.
+                                📍 Estás a {Math.round(distanceToPickup)}m del pasajero. Acércate a menos de 250m para poder marcar que llegaste.
                             </Text>
                         )}
 

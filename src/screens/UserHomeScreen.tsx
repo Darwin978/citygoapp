@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Switch, Image, Platform, Modal, TextInput, KeyboardAvoidingView, Linking, AppState } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import MapView, { Marker, AnimatedRegion, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -29,9 +30,11 @@ const SOCKET_URL = BACKEND_URL; // Tu backend NestJS
 export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriverOffline?: boolean, onOnline?: () => void }) {
     const { showAlert } = useCustomAlert();
     const insets = useSafeAreaInsets();
+    const isFocused = useIsFocused();
     const [userId, setUserId] = useState<string | null>(null);
     const [region, setRegion] = useState<any>(null);
     const [isOnline, setIsOnline] = useState(false);
+    const [driverEta, setDriverEta] = useState<number | null>(null);
     const [status, setStatus] = useState<'IDLE' | 'PICKUP' | 'DESTINATION' | 'ROUTE' | 'SEARCHING' | 'TO_DESTINO' | 'ON_RIDE' | 'REQUESTED' | 'ACCEPTED' | 'TO_PICKUP' | 'IN_PROGRESS' | 'TO_RATING' | 'COMPLETED' | 'CANCELLED'>('PICKUP');
     const [role, setRole] = useState<string | null>(null);
     const [routeDetails, setRouteDetails] = useState<any>(null);
@@ -249,18 +252,12 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
 
             socket.current.on('trip_accepted', async (data: any) => {
                 console.log("¡Viaje aceptado!", data);
-                socket.current.emit('joinRide', data.rideId);
-                setRideId(data.rideId);
-                setCurrentRideId(data.rideId);
-
-                setDriverInfo({
-                    name: data.driverName,
-                    vehicle: data.vehicle || { plate: data.driverVehicle },
-                });
-                setDriverLocation(data.currentLocation);
-                setActiveRideBackendStatus('ACCEPTED');
-                setStatus('ON_RIDE');
                 await AsyncStorage.setItem('activeRideId', data.rideId);
+                if (socket.current) {
+                    socket.current.emit('joinRide', data.rideId);
+                }
+                // Hacemos restoreSession para traer toda la información hidratada (incluyendo el mensaje inicial del chat)
+                await restoreSession();
                 showAlert("¡Conductor asignado!", `Tu conductor va en camino.`);
             });
 
@@ -469,9 +466,9 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     };
 
     useEffect(() => {
-        if (!userId) return;
+        if (!userId || !isFocused) return;
         restoreSession();
-    }, [userId]);
+    }, [userId, isFocused]);
 
     // Actualizar la pantalla cuando la app regrese de segundo plano a primer plano
     useEffect(() => {
@@ -1066,7 +1063,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         strokeWidth={5}
                         strokeColor="#1D4ED8"
                         onReady={res => {
-                            // No usamos fitToCoordinates aquí para no "marear" al usuario moviendo la cámara solo
+                            if (status === 'ON_RIDE') {
+                                setDriverEta(Math.round(res.duration));
+                            } else {
+                                setDriverEta(null);
+                            }
                         }}
                     />
                 )}
@@ -1082,7 +1083,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                             // 1. Si soy el conductor asignado al viaje: Salgo de MI ubicación actual.
                             // 2. Si soy el cliente (aunque sea conductor de profesión): Salgo de mi punto de recogida.
                             origin={
-                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId
+                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId && !isDriverOffline
                                     ? myLocation
                                     : pickupCoords
                             }
@@ -1090,10 +1091,10 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                             // DESTINO:
                             destination={
                                 // Si soy el conductor asignado:
-                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId
+                                (status === 'ON_RIDE' || status === 'TO_DESTINO') && activeRequestRide?.driverId === userId && !isDriverOffline
                                     ? (!otpValidate
-                                        ? { latitude: activeRequestRide.ride.originLat, longitude: activeRequestRide.ride.originLng }
-                                        : { latitude: activeRequestRide.ride.destLat, longitude: activeRequestRide.ride.destLng })
+                                        ? { latitude: activeRequestRide.ride?.originLat || 0, longitude: activeRequestRide.ride?.originLng || 0 }
+                                        : { latitude: activeRequestRide.ride?.destLat || 0, longitude: activeRequestRide.ride?.destLng || 0 })
                                     // Si soy el cliente:
                                     : destinationCoords
                             }
@@ -1101,7 +1102,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                             apikey={GOOGLE_MAPS_APIKEY}
                             strokeWidth={5}
                             // Color: Verde si estoy conduciendo, Azul si estoy esperando/viajando
-                            strokeColor={activeRequestRide?.driverId === userId ? "#10B981" : "#1D4ED8"}
+                            strokeColor={activeRequestRide?.driverId === userId && !isDriverOffline ? "#10B981" : "#1D4ED8"}
 
                             onReady={res => {
                                 setRouteDetails(res);
@@ -1112,11 +1113,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         />
                     )}
 
-                {status === 'ON_RIDE' && role === Roles.DRIVER && activeRequestRide && !otpValidate && (
+                {status === 'ON_RIDE' && role === Roles.DRIVER && !isDriverOffline && activeRequestRide && !otpValidate && (
                     <Marker
                         coordinate={{
-                            latitude: activeRequestRide.ride.originLat,
-                            longitude: activeRequestRide.ride.originLng
+                            latitude: activeRequestRide.ride?.originLat || 0,
+                            longitude: activeRequestRide.ride?.originLng || 0
                         }}
                         title="Recoger aquí"
                     >
@@ -1129,11 +1130,11 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                     </Marker>
                 )}
 
-                {status === 'ON_RIDE' && role === Roles.DRIVER && activeRequestRide && otpValidate && (
+                {status === 'ON_RIDE' && role === Roles.DRIVER && !isDriverOffline && activeRequestRide && otpValidate && (
                     <Marker
                         coordinate={{
-                            latitude: activeRequestRide.ride.destLat,
-                            longitude: activeRequestRide.ride.destLng
+                            latitude: activeRequestRide.ride?.destLat || 0,
+                            longitude: activeRequestRide.ride?.destLng || 0
                         }}
                         title="Destino"
                         anchor={{ x: 0.5, y: 1 }}
@@ -1141,7 +1142,6 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         <Ionicons name="location" size={50} color="#EF4444" />
                     </Marker>
                 )}
-
                 {(status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocationUser && (
                     <Marker
                         coordinate={{
@@ -1403,7 +1403,7 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         </View>
 
                         <TouchableOpacity style={styles.btnConfirm} onPress={handleRequestRide} disabled={loading}>
-                            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Confirmar Viaje</Text>}
+                            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Pedir Taxi</Text>}
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.btnCancel}
@@ -1482,9 +1482,16 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         ) : (
                             <View style={styles.clientInfoRow}>
                                 <Ionicons name="car" size={24} color="#10B981" />
-                                <Text style={styles.clientNameText}>
-                                    Tu conductor llegará pronto
-                                </Text>
+                                <View style={{ flex: 1, marginLeft: 10 }}>
+                                    <Text style={[styles.clientNameText, { marginLeft: 0 }]}>
+                                        Tu conductor va en camino
+                                    </Text>
+                                    <Text style={{ fontSize: 13, color: '#6B7280', marginTop: 2 }}>
+                                        {driverEta !== null 
+                                            ? `Llegada estimada: ${driverEta} ${driverEta === 1 ? 'minuto' : 'minutos'}` 
+                                            : 'Calculando tiempo de llegada...'}
+                                    </Text>
+                                </View>
                             </View>
                         )}
                         <Text style={{ textAlign: 'center', marginTop: 15, color: '#6B7280' }}>

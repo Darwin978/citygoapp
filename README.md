@@ -21,3 +21,41 @@ La navegación entre pantallas está gobernada por **React Navigation** (impleme
 - **Rastreo en Tiempo Real:** Establecimiento de conexiones web sockets persistentes para enviar y recibir actualizaciones de ubicación de conductores al instante.
 - **Notificaciones Push y en Segundo Plano:** Uso de `@react-native-firebase/messaging` y `expo-notifications` para recibir alertas de cambios en el estado del viaje incluso cuando la app no está en primer plano, aprovechando también `expo-task-manager` para ejecutar tareas en el fondo.
 - **Persistencia de Sesión:** Manejo seguro del token de sesión guardándolo en `@react-native-async-storage/async-storage` para evitar que el usuario tenga que iniciar sesión repetidamente.
+
+## Generación de Build para Producción (.aab para Google Play Store)
+
+Para generar el archivo **Android App Bundle (.aab)** necesario para subir la aplicación a Google Play Console, puedes elegir entre dos métodos:
+
+### Método 1: Usando EAS Build (Servicio en la Nube de Expo - Recomendado)
+
+Este método compila la aplicación de manera remota en los servidores de Expo, gestionando de forma automática las firmas y credenciales de producción.
+
+1. Asegúrate de tener instalado el CLI de EAS (o usa `npx`):
+   ```bash
+   npm install -g eas-cli
+   ```
+2. Inicia sesión en tu cuenta de Expo:
+   ```bash
+   eas login
+   ```
+3. Ejecuta el comando de compilación para producción en Android:
+   ```bash
+   eas build --platform android --profile production
+   ```
+Al finalizar el proceso, se te proporcionará un enlace directo de descarga para el archivo `.aab`.
+
+### Método 2: Compilación Local (Usando Gradle)
+
+Si deseas compilar el binario localmente en tu ordenador (requiere tener configurados Android Studio, SDK de Android y Java JDK):
+
+1. Genera o actualiza el proyecto nativo si es necesario:
+   ```bash
+   npx expo prebuild
+   ```
+2. Entra al directorio nativo de Android y compila el bundle en modo release:
+   ```bash
+   cd android && ./gradlew bundleRelease
+   ```
+El archivo `.aab` generado estará ubicado en:
+`cityGoApp/android/app/build/outputs/bundle/release/app-release.aab`
+

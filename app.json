@@ -88,7 +88,8 @@
           "locationAlwaysPermission": "Permite a CityGo acceder a tu ubicación siempre.",
           "locationWhenInUsePermission": "Permite a CityGo acceder a tu ubicación mientras la app está en uso.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "./plugins/withModularHeadersIOS",
