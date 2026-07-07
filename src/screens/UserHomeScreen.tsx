@@ -546,23 +546,6 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
     }, []);
 
     useEffect(() => {
-        const info = async () => {
-
-            console.log("activeRequestRide", activeRequestRide);
-            const coordinate = {
-                latitude: activeRequestRide?.ride?.originLat,
-                longitude: activeRequestRide?.ride?.originLng,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-            }
-            console.log("coordinate", coordinate);
-
-        }
-        info()
-        // refrescar cada 10 seg
-    }, [activeRequestRide])
-
-    useEffect(() => {
         let interval: NodeJS.Timeout;
         if (status === 'SEARCHING') {
             const calculateInitialTime = () => {
@@ -730,40 +713,6 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
         }
     };
 
-    const useDriverTracking = () => {
-        const [driverLocation, setDriverLocation] = useState<{
-            latitude: number;
-            longitude: number;
-            heading?: number; // Para que el icono del carro gire
-        } | null>(null);
-
-        useEffect(() => {
-            if (!socket || !activeRequestRide?.tripId) return;
-
-            // Escuchamos el evento específico de este viaje
-            // El backend debe emitir a: `ride_location_${activeRideId}`
-            const eventName = `locationUpdated`;
-
-            socket.current.on(eventName, (data: any) => {
-                console.log("data", data);
-
-                if (data.rideId === activeRequestRide?.tripId) {
-                    setDriverLocation({
-                        latitude: data.coords.lat || data.coords.latitude,
-                        longitude: data.coords.lng || data.coords.longitude,
-                        heading: data.coords.heading || 0,
-                    });
-                }
-            });
-
-            return () => {
-                socket.current.off(eventName);
-            };
-        }, [socket, activeRequestRide?.tripId]);
-
-        return driverLocation;
-    };
-    const driverLocationUser = useDriverTracking();
     // explicitPickup: cuando se llama desde moveToLocation el pickupCoords del estado
     // puede no estar actualizado todavía (closure stale), así que se pasa explícitamente.
     const getPrice = async (
@@ -1140,21 +1089,6 @@ export default function UserHomeScreen({ isDriverOffline, onOnline }: { isDriver
                         anchor={{ x: 0.5, y: 1 }}
                     >
                         <Ionicons name="location" size={50} color="#EF4444" />
-                    </Marker>
-                )}
-                {(status === 'ON_RIDE' || status === 'TO_DESTINO') && driverLocationUser && (
-                    <Marker
-                        coordinate={{
-                            latitude: driverLocationUser.latitude,
-                            longitude: driverLocationUser.longitude,
-                        }}
-                        rotation={driverLocationUser.heading}
-                        flat={true} // Mantiene el icono pegado al mapa al rotar
-                    >
-                        <Image
-                            source={require('../../assets/car_icon.png')}
-                            style={{ width: 40, height: 40 }}
-                        />
                     </Marker>
                 )}
 

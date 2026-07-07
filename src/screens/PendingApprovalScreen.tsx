@@ -20,8 +20,6 @@ export default function PendingApprovalScreen({ navigation }: any) {
     try {
       const token = await AsyncStorage.getItem('authToken') || '';
       const response = await getUserInfoApproved(token);
-      console.log(response);
-      
       if (response.isApproved) {
         await AsyncStorage.setItem('isApproved', 'true');
         aproveed(true);

@@ -57,7 +57,7 @@ export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hideAlert = () => {
     Animated.parallel([
       Animated.timing(scaleValue, {
-        toValue: 0.9,
+        toValue: 0,
         duration: 200,
         useNativeDriver: true,
       }),

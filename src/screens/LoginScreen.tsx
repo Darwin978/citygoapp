@@ -28,20 +28,14 @@ export default function LoginScreen({ navigation }: any) {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
-    setLoading(true);
     if (!email || !password) {
       showAlert("Error", "Por favor completa todos los campos");
       return;
     }
 
+    setLoading(true);
     try {
-      console.log(email);
-      console.log(password);
-
-
-      const response = await loginApi(email, password);
-
-      console.log("Login exitoso:", response);
+      const response = await loginApi(email.trim(), password);
 
       let authToken = response.access_token;
       let user = response.user;

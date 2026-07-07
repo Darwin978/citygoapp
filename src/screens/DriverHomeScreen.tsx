@@ -201,8 +201,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                 showAlert("¡Conductor asignado!", `${data.driverName} va en camino.`);
             });
 
-            socket.current.on('locationUpdated', (newCoords: any) => {
-                // Asegúrate de que el backend envíe 'latitude' y 'longitude'
+            socket.current.on('driver_location_update', (newCoords: any) => {
                 const coords = {
                     latitude: newCoords.lat || newCoords.latitude,
                     longitude: newCoords.lng || newCoords.longitude,
@@ -277,8 +276,8 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
             });
 
             socket.current.on('driver_arrived', (data: any) => {
-                setStatus('ON_RIDE'); // Sugerencia: Usa ACCEPTED antes de ON_RIDE
-                showAlert("¡Conductor Llegando!", `El conductoe llego a recogerte, sal ahora!`);
+                setStatus('ON_RIDE');
+                showAlert("¡Conductor Llegando!", `El conductor llegó a recogerte, ¡sal ahora!`);
             });
 
             socket.current.on('ride_finished', async (data: any) => {
@@ -454,13 +453,10 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
 
         socket.current.emit('accept_trip', { tripId: request.tripId, userId }, async (response: any) => {
             setLoading(false);
-            console.log("triId", request.tripId);
-            console.log("Respuesta de la API:", response);
             if (response.status === 'success') {
                 await AsyncStorage.setItem('activeRideId', request.tripId);
                 setCurrentRideId(request.tripId);
                 setActiveRideBackendStatus('ACCEPTED');
-                console.log("requestRide original", response.data);
                 setActiveRequestRide(response.data);
                 setAvailableRequests([]);
                 setShowRequestDialog(false);
@@ -740,7 +736,7 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         if (role === Roles.DRIVER && isOnline) {
             (async () => {
                 locationWatcher = await Location.watchPositionAsync(
-                    { accuracy: Location.Accuracy.High, distanceInterval: 5 },
+                    { accuracy: Location.Accuracy.High, distanceInterval: 15 },
                     (location) => {
                         const coords = {
                             latitude: location.coords.latitude,
@@ -767,23 +763,6 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
         }
         return () => locationWatcher?.remove();
     }, [isOnline, currentRideId, isManualZoom]);
-
-    useEffect(() => {
-        const info = async () => {
-
-            console.log("activeRequestRide", activeRequestRide);
-            const coordinate = {
-                latitude: activeRequestRide?.ride?.originLat,
-                longitude: activeRequestRide?.ride?.originLng,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-            }
-            console.log("coordinate", coordinate);
-
-        }
-        info()
-        // refrescar cada 10 seg
-    }, [activeRequestRide])
 
     // --- FUNCIONES DE APOYO ---
 
@@ -902,11 +881,13 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
                     onPress: async () => {
                         try {
                             if (currentRideId) {
-                                const response = await cancelSolicitudApi(currentRideId);
-                                console.log("Viaje cancelado:", response);
+                                await cancelSolicitudApi(currentRideId);
                             }
+                            await AsyncStorage.removeItem('activeRideId');
                             setStatus('ROUTE');
                             setCurrentRideId(null);
+                            setActiveRideBackendStatus(null);
+                            setActiveRequestRide(null);
                         } catch (e) {
                             console.error(e);
                             showAlert('Error', 'Hubo un problema al cancelar la solicitud.');
@@ -937,21 +918,21 @@ export default function DriverHomeScreen({ onOffline }: { onOffline?: () => void
             const data = {
                 originAddress: pickupAddress,
                 destinationAddress: destinationAddress,
-                originLat: region.latitude,
-                originLng: region.longitude,
+                originLat: pickupCoords.latitude,
+                originLng: pickupCoords.longitude,
                 destLat: destinationCoords.latitude,
                 destLng: destinationCoords.longitude,
                 finalPrice: paymentMethod === 'CARD' ? parseFloat((price / 0.9425).toFixed(2)) : price,
                 paymentMethod,
                 reference: reference.trim() || undefined,
             }
-            console.log("Data enviada:", data);
             const response = await requestRideApi(data);
-            console.log("Respuesta de la API:", response);
-
 
             socket.current.emit('joinRide', response.id);
             setCurrentRideId(response.id);
+            setActiveRideBackendStatus('REQUESTED');
+            setActiveRequestRide({ ride: response, driverId: null });
+            await AsyncStorage.setItem('activeRideId', response.id);
             setStatus('SEARCHING');
 
         } catch (e) {

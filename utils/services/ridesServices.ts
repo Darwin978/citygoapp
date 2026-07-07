@@ -64,7 +64,6 @@ export async function getPriceApi(originLat: number, originLng: number, destLat:
         const data = {
             originLat: originLat, originLng: originLng, destLat: destLat, destLng: destLng, categoryId: 1
         }
-        console.log("data", data)
         const response = await fetch(endPoint.getPrice, {
             method: 'POST',
             headers: {

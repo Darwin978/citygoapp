@@ -5,7 +5,6 @@ export async function addVehicleApi(vehicle: any) {
 
     try {
         const token = await AsyncStorage.getItem('authToken');
-        console.log("data", vehicle)
         if (!token) {
             throw new Error('No token found');
         }
@@ -17,8 +16,6 @@ export async function addVehicleApi(vehicle: any) {
             },
             body: JSON.stringify(vehicle)
         });
-
-        console.log("response", response)
 
         if (!response.ok) {
             throw new Error('Error al agregar vehiculo');

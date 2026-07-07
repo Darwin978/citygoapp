@@ -4,8 +4,6 @@ import axios from 'axios';
 
 export async function loginApi(email: string, password: string) {
     try {
-        console.log(endPoint.login);
-        console.log("Ingresa login");
         const response = await fetch(endPoint.login, {
             method: 'POST',
             headers: {
@@ -79,9 +77,7 @@ export async function getUserStatsApi() {
             }
         });
 
-        console.log("response", response);
-
-        if (!response) {
+        if (!response.ok) {
             throw new Error('Failed to fetch user stats');
         }
 
@@ -112,8 +108,6 @@ export async function getUserInfoApproved(token: string) {
 
 export async function registerClientApi(formData: any) {
     try {
-        console.log("Ingresa registro cliente");
-
         const response = await axios.post(endPoint.registerClient, formData, {
             headers: {
                 'Accept': 'application/json',
@@ -135,8 +129,6 @@ export async function registerClientApi(formData: any) {
 
 export async function registerDriverApi(formData: any) {
     try {
-        console.log("Ingresa registro conuctor");
-
         const response = await axios.post(endPoint.registerDriver, formData, {
             headers: {
                 'Accept': 'application/json',
@@ -200,7 +192,6 @@ export async function updateLocationBgApi(lat: number, lng: number): Promise<voi
 
 export async function sendRatingApi(ratingData: any) {
     try {
-        console.log("Ingresa envio de rating", ratingData);
         const token = await AsyncStorage.getItem('authToken');
         const response = await fetch(`${endPoint.sendRating}/${ratingData.rideId}`, {
             method: 'POST',
